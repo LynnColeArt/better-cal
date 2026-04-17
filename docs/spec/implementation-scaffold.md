@@ -125,7 +125,7 @@ Adapters should not:
 4. API v2 auth route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with credential verification factored into `backend/internal/auth/`.
 5. Booking lifecycle canary route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with fixture state and transitions factored into `backend/internal/booking/`.
 6. Database connection and transaction helpers.
-7. Principal resolver and policy package. Principal fixture resolution has started in `backend/internal/auth/`; durable identity lookup and policy enforcement are next.
+7. Principal resolver and policy package. Principal fixture resolution has started in `backend/internal/auth/`; named, deny-by-default policy enforcement has started in `backend/internal/authz/`. Durable identity lookup and resource-scoped policy checks are next.
 8. One low-risk persisted read route.
 9. Next.js tRPC bridge proof of concept for one query and one mutation.
 10. Slot read fixture replay.

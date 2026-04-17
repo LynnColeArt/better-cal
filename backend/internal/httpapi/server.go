@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
+	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/logging"
@@ -20,6 +21,7 @@ const requestIDKey contextKey = "request-id"
 type Server struct {
 	cfg          config.Config
 	authService  *auth.Service
+	authorizer   *authz.Authorizer
 	bookingStore *booking.Store
 	logger       *slog.Logger
 	mux          *http.ServeMux
@@ -36,6 +38,7 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger) http.Handler {
 	server := &Server{
 		cfg:          cfg,
 		authService:  auth.NewService(cfg),
+		authorizer:   authz.NewAuthorizer(),
 		bookingStore: booking.NewStore(),
 		logger:       logger,
 		mux:          http.NewServeMux(),
@@ -124,6 +127,18 @@ func (s *Server) authenticator() *auth.Service {
 		return s.authService
 	}
 	return auth.NewService(s.cfg)
+}
+
+func (s *Server) authorize(principal auth.Principal, policy authz.Policy) bool {
+	return s.policies().Authorize(principal, policy).Allowed
+}
+
+func (s *Server) policies() *authz.Authorizer {
+	if s.authorizer != nil {
+		return s.authorizer
+	}
+	s.authorizer = authz.NewAuthorizer()
+	return s.authorizer
 }
 
 func (s *Server) bookings() *booking.Store {

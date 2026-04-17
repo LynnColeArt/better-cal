@@ -9,12 +9,14 @@ import (
 )
 
 type Principal struct {
-	ID        int
-	UUID      string
-	Username  string
-	Email     string
-	CreatedAt string
-	UpdatedAt string
+	ID          int
+	UUID        string
+	Type        string
+	Username    string
+	Email       string
+	Permissions []string
+	CreatedAt   string
+	UpdatedAt   string
 }
 
 type OAuthClient struct {
@@ -56,10 +58,17 @@ func (s *Service) AuthenticateAPIKey(authorization string) (Principal, bool) {
 	}
 
 	return Principal{
-		ID:        123,
-		UUID:      "00000000-0000-4000-8000-000000000123",
-		Username:  "fixture-user",
-		Email:     "fixture-user@example.test",
+		ID:       123,
+		UUID:     "00000000-0000-4000-8000-000000000123",
+		Type:     "user",
+		Username: "fixture-user",
+		Email:    "fixture-user@example.test",
+		Permissions: []string{
+			"me:read",
+			"oauth-client:read",
+			"booking:read",
+			"booking:write",
+		},
 		CreatedAt: "2026-01-01T00:00:00.000Z",
 		UpdatedAt: "2026-01-01T00:00:00.000Z",
 	}, true

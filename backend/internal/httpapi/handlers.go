@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 )
 
@@ -17,6 +18,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authenticateAPIKey(r)
 	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyMeRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
 		return
 	}
 
@@ -35,7 +40,12 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticateAPIKey(r); !ok {
+	principal, ok := s.authenticateAPIKey(r)
+	if !ok {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyBookingWrite) {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
 		return
 	}
@@ -55,8 +65,13 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticateAPIKey(r); !ok {
+	principal, ok := s.authenticateAPIKey(r)
+	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyBookingRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
 		return
 	}
 
@@ -71,7 +86,12 @@ func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticateAPIKey(r); !ok {
+	principal, ok := s.authenticateAPIKey(r)
+	if !ok {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyBookingWrite) {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
 		return
 	}
@@ -97,7 +117,12 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticateAPIKey(r); !ok {
+	principal, ok := s.authenticateAPIKey(r)
+	if !ok {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyBookingWrite) {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
 		return
 	}
@@ -128,8 +153,13 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authenticateAPIKey(r); !ok {
+	principal, ok := s.authenticateAPIKey(r)
+	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "", false)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyOAuth2Read) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
 		return
 	}
 
