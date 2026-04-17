@@ -123,13 +123,13 @@ Adapters should not:
 2. Fixture runner with strict HTTP response replay and redaction-aware comparison. Started in `tools/fixture-replay/`.
 3. Data contract registries for public schemas, enums, identifiers, stored JSON, and secret classification. Started in `contracts/registries/`.
 4. API v2 auth route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with credential verification factored into `backend/internal/auth/`.
-5. Booking lifecycle canary route compatibility for the starter fixture set. Started in `backend/internal/httpapi/`.
+5. Booking lifecycle canary route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with fixture state and transitions factored into `backend/internal/booking/`.
 6. Database connection and transaction helpers.
 7. Principal resolver and policy package. Principal fixture resolution has started in `backend/internal/auth/`; durable identity lookup and policy enforcement are next.
 8. One low-risk persisted read route.
 9. Next.js tRPC bridge proof of concept for one query and one mutation.
 10. Slot read fixture replay.
-11. Booking validation service with durable state and side-effect ports.
+11. Booking validation service with durable state and side-effect ports. Fixture lifecycle behavior has started in `backend/internal/booking/`; persistence and provider ports are next.
 
 ## Testing Layers
 

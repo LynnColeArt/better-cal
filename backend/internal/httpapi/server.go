@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
+	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/logging"
 )
@@ -18,13 +18,11 @@ type contextKey string
 const requestIDKey contextKey = "request-id"
 
 type Server struct {
-	cfg         config.Config
-	authService *auth.Service
-	logger      *slog.Logger
-	mux         *http.ServeMux
-	mu          sync.Mutex
-	bookings    map[string]booking
-	idempotency map[string]string
+	cfg          config.Config
+	authService  *auth.Service
+	bookingStore *booking.Store
+	logger       *slog.Logger
+	mux          *http.ServeMux
 }
 
 func NewServer(cfg config.Config) http.Handler {
@@ -36,12 +34,11 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger) http.Handler {
 		logger = slog.Default()
 	}
 	server := &Server{
-		cfg:         cfg,
-		authService: auth.NewService(cfg),
-		logger:      logger,
-		mux:         http.NewServeMux(),
-		bookings:    make(map[string]booking),
-		idempotency: make(map[string]string),
+		cfg:          cfg,
+		authService:  auth.NewService(cfg),
+		bookingStore: booking.NewStore(),
+		logger:       logger,
+		mux:          http.NewServeMux(),
 	}
 	server.routes()
 	return server
@@ -129,96 +126,20 @@ func (s *Server) authenticator() *auth.Service {
 	return auth.NewService(s.cfg)
 }
 
+func (s *Server) bookings() *booking.Store {
+	if s.bookingStore != nil {
+		return s.bookingStore
+	}
+	s.bookingStore = booking.NewStore()
+	return s.bookingStore
+}
+
 func (s *Server) requestID(r *http.Request) string {
 	requestID, _ := r.Context().Value(requestIDKey).(string)
 	if requestID == "" {
 		return s.cfg.RequestID
 	}
 	return requestID
-}
-
-func (s *Server) fixtureBooking(r *http.Request, overrides booking) booking {
-	base := booking{
-		UID:         "mock-booking-personal-basic",
-		ID:          987,
-		Title:       "Fixture Event",
-		Status:      "accepted",
-		Start:       "2026-05-01T15:00:00.000Z",
-		End:         "2026-05-01T15:30:00.000Z",
-		EventTypeID: 1001,
-		Attendees: []attendee{
-			{
-				ID:       321,
-				Name:     "Fixture Attendee",
-				Email:    "fixture-attendee@example.test",
-				TimeZone: "America/Chicago",
-			},
-		},
-		Responses: map[string]any{
-			"name":  "Fixture Attendee",
-			"email": "fixture-attendee@example.test",
-		},
-		Metadata: map[string]any{
-			"fixture": "personal-basic",
-		},
-		CreatedAt: "2026-01-01T00:00:00.000Z",
-		UpdatedAt: "2026-01-01T00:00:00.000Z",
-		RequestID: s.requestID(r),
-	}
-	return mergeBooking(base, overrides)
-}
-
-func mergeBooking(base booking, overrides booking) booking {
-	if overrides.UID != "" {
-		base.UID = overrides.UID
-	}
-	if overrides.ID != 0 {
-		base.ID = overrides.ID
-	}
-	if overrides.Title != "" {
-		base.Title = overrides.Title
-	}
-	if overrides.Status != "" {
-		base.Status = overrides.Status
-	}
-	if overrides.Start != "" {
-		base.Start = overrides.Start
-	}
-	if overrides.End != "" {
-		base.End = overrides.End
-	}
-	if overrides.EventTypeID != 0 {
-		base.EventTypeID = overrides.EventTypeID
-	}
-	if overrides.Attendees != nil {
-		base.Attendees = overrides.Attendees
-	}
-	if overrides.Responses != nil {
-		base.Responses = overrides.Responses
-	}
-	if overrides.Metadata != nil {
-		base.Metadata = overrides.Metadata
-	}
-	if overrides.CreatedAt != "" {
-		base.CreatedAt = overrides.CreatedAt
-	}
-	if overrides.UpdatedAt != "" {
-		base.UpdatedAt = overrides.UpdatedAt
-	}
-	if overrides.RequestID != "" {
-		base.RequestID = overrides.RequestID
-	}
-	return base
-}
-
-func (s *Server) ensureBooking(r *http.Request) booking {
-	existing, ok := s.bookings["mock-booking-personal-basic"]
-	if ok {
-		return existing
-	}
-	created := s.fixtureBooking(r, booking{})
-	s.bookings[created.UID] = created
-	return created
 }
 
 type responseRecorder struct {
