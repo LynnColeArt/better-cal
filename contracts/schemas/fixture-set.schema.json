@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/fixture-set.schema.json",
+  "title": "Fixture Set",
+  "type": "object",
+  "required": ["id", "status", "description", "owner", "fixtures"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "accepted", "amended", "security-break", "deprecated", "needs-capture"]
+    },
+    "description": { "type": "string" },
+    "owner": { "type": "string", "minLength": 1 },
+    "fixtures": {
+      "type": "array",
+      "items": { "$ref": "fixture-manifest.schema.json" }
+    }
+  }
+}

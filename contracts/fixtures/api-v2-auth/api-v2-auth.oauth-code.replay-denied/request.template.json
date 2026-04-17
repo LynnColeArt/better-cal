@@ -1,0 +1,5 @@
+{
+  "$schema": "../../../schemas/request-template.schema.json",
+  "captureMode": "manual",
+  "notes": "Requires generating one authorization code and attempting two token exchanges. The second exchange must fail."
+}

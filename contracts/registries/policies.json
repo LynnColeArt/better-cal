@@ -1,0 +1,79 @@
+{
+  "$schema": "../schemas/policy-registry.schema.json",
+  "status": "draft",
+  "description": "Initial route policy registry for the first auth and booking slices.",
+  "policies": [
+    {
+      "id": "policy.public.health",
+      "status": "draft",
+      "authModes": ["none"],
+      "principalTypes": ["anonymous"],
+      "requiredPermissions": [],
+      "resourceResolver": "none",
+      "negativeFixtures": []
+    },
+    {
+      "id": "policy.me.read",
+      "status": "draft",
+      "authModes": ["api-key", "platform-access-token", "session"],
+      "principalTypes": ["user", "managed-user"],
+      "requiredPermissions": ["me:read"],
+      "resourceResolver": "current-principal",
+      "negativeFixtures": ["api-v2-auth.api-key.invalid", "api-v2-auth.session.identity-mutation-rejected"]
+    },
+    {
+      "id": "policy.oauth2.client.read",
+      "status": "draft",
+      "authModes": ["api-key"],
+      "principalTypes": ["user", "organization-admin", "system-admin"],
+      "requiredPermissions": ["oauth-client:read"],
+      "resourceResolver": "oauth-client-by-client-id",
+      "negativeFixtures": ["missing-credential", "wrong-owner", "insufficient-permission"]
+    },
+    {
+      "id": "policy.oauth2.client.public-read",
+      "status": "draft",
+      "authModes": ["none"],
+      "principalTypes": ["anonymous"],
+      "requiredPermissions": [],
+      "resourceResolver": "oauth-client-public-metadata",
+      "negativeFixtures": ["unknown-client-id"]
+    },
+    {
+      "id": "policy.oauth2.token.exchange",
+      "status": "draft",
+      "authModes": ["oauth-client", "public-pkce-client"],
+      "principalTypes": ["oauth-client"],
+      "requiredPermissions": ["oauth-token:exchange"],
+      "resourceResolver": "oauth-client-and-authorization-code",
+      "negativeFixtures": ["api-v2-auth.oauth-code.replay-denied", "wrong-client", "wrong-redirect-uri", "expired-code"]
+    },
+    {
+      "id": "policy.booking.read",
+      "status": "draft",
+      "authModes": ["api-key", "platform-access-token", "session", "public-booking-token"],
+      "principalTypes": ["user", "platform-client", "managed-user", "anonymous-token-holder"],
+      "requiredPermissions": ["booking:read"],
+      "resourceResolver": "booking-by-public-uid",
+      "negativeFixtures": ["wrong-owner", "wrong-organization", "invalid-public-token"]
+    },
+    {
+      "id": "policy.booking.write",
+      "status": "draft",
+      "authModes": ["api-key", "platform-access-token", "session", "public-booking-token"],
+      "principalTypes": ["user", "platform-client", "managed-user", "anonymous-token-holder"],
+      "requiredPermissions": ["booking:write"],
+      "resourceResolver": "booking-target-event-type",
+      "negativeFixtures": ["booking.create.unauthorized-user-denied", "wrong-owner", "wrong-organization", "unavailable-slot"]
+    },
+    {
+      "id": "policy.booking.host-action",
+      "status": "draft",
+      "authModes": ["api-key", "platform-access-token", "session"],
+      "principalTypes": ["user", "platform-client", "managed-user"],
+      "requiredPermissions": ["booking:host-action"],
+      "resourceResolver": "booking-host-or-platform-permission",
+      "negativeFixtures": ["not-host", "wrong-team", "insufficient-permission"]
+    }
+  ]
+}

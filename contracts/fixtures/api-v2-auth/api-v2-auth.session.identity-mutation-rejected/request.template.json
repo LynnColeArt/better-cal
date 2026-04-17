@@ -1,0 +1,5 @@
+{
+  "$schema": "../../../schemas/request-template.schema.json",
+  "captureMode": "manual",
+  "notes": "Requires a controlled session/JWT mutation setup. Capture should prove server-owned identity wins over client-controlled session update fields."
+}

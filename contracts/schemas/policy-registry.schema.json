@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/policy-registry.schema.json",
+  "title": "Policy Registry",
+  "type": "object",
+  "required": ["status", "description", "policies"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "status": { "type": "string" },
+    "description": { "type": "string" },
+    "policies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "authModes",
+          "principalTypes",
+          "requiredPermissions",
+          "resourceResolver",
+          "negativeFixtures"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string" },
+          "authModes": { "type": "array", "items": { "type": "string" } },
+          "principalTypes": { "type": "array", "items": { "type": "string" } },
+          "requiredPermissions": { "type": "array", "items": { "type": "string" } },
+          "resourceResolver": { "type": "string" },
+          "negativeFixtures": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "../schemas/enum-registry.schema.json",
+  "status": "draft",
+  "description": "Initial enum registry for public and persisted string values.",
+  "enums": [
+    {
+      "id": "enum.fixture.status",
+      "status": "accepted",
+      "values": ["draft", "accepted", "amended", "security-break", "deprecated", "needs-capture"]
+    },
+    {
+      "id": "enum.fixture.comparisonMode",
+      "status": "accepted",
+      "values": ["strict", "shape", "schema", "state", "side-effect", "security-break"]
+    },
+    {
+      "id": "enum.auth.mode",
+      "status": "draft",
+      "values": ["none", "api-key", "platform-client-secret", "platform-access-token", "third-party-access-token", "session", "oauth-client", "public-pkce-client", "public-booking-token"]
+    },
+    {
+      "id": "enum.secret.class",
+      "status": "accepted",
+      "values": ["public", "input-only", "show-once", "internal-only", "derived"]
+    },
+    {
+      "id": "enum.booking.status",
+      "status": "draft",
+      "values": ["cancelled", "accepted", "rejected", "pending", "awaiting_host"]
+    },
+    {
+      "id": "enum.membership.role",
+      "status": "draft",
+      "values": ["MEMBER", "ADMIN", "OWNER"]
+    },
+    {
+      "id": "enum.oauth.clientType",
+      "status": "needs-capture",
+      "values": []
+    },
+    {
+      "id": "enum.oauth.clientStatus",
+      "status": "needs-capture",
+      "values": []
+    },
+    {
+      "id": "enum.webhook.triggerEvent",
+      "status": "needs-capture",
+      "values": []
+    },
+    {
+      "id": "enum.location.type",
+      "status": "needs-capture",
+      "values": []
+    },
+    {
+      "id": "enum.payment.status",
+      "status": "needs-capture",
+      "values": []
+    }
+  ]
+}

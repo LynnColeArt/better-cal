@@ -1,3 +1,0 @@
-# Event types will become Links…
-
-…and this is where the feature will live.

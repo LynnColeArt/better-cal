@@ -1,1 +1,0 @@
-export { useCalcomTheme } from "./useCalcomTheme";

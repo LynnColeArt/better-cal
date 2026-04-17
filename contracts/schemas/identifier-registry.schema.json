@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/identifier-registry.schema.json",
+  "title": "Identifier Registry",
+  "type": "object",
+  "required": ["status", "description", "identifiers"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "status": { "type": "string" },
+    "description": { "type": "string" },
+    "identifiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "publicExposure",
+          "uniquenessScope",
+          "entropy",
+          "stability",
+          "notes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "kind": { "type": "string" },
+          "publicExposure": { "type": "string" },
+          "uniquenessScope": { "type": "string" },
+          "entropy": { "type": "string" },
+          "stability": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}

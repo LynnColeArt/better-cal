@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/fixture-manifest.schema.json",
+  "title": "Fixture Manifest",
+  "type": "object",
+  "required": [
+    "id",
+    "surface",
+    "operation",
+    "status",
+    "auth",
+    "comparison",
+    "securityBreaks",
+    "inputs",
+    "outputs",
+    "schemas",
+    "redactions",
+    "unstableFields",
+    "owner"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "surface": { "type": "string", "minLength": 1 },
+    "operation": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "accepted", "amended", "security-break", "deprecated", "needs-capture"]
+    },
+    "auth": { "type": "string", "minLength": 1 },
+    "comparison": {
+      "type": "string",
+      "enum": ["strict", "shape", "schema", "state", "side-effect", "security-break"]
+    },
+    "securityBreaks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "outputs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "schemas": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "redactions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "unstableFields": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "owner": { "type": "string", "minLength": 1 }
+  }
+}

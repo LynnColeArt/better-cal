@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../schemas/request-template.schema.json",
+  "captureMode": "http",
+  "method": "GET",
+  "path": "/v2/auth/oauth2/clients/{clientId}",
+  "pathParams": {
+    "clientId": "missing-client-id-for-fixture"
+  },
+  "headers": {
+    "Authorization": "Bearer ${CALDIY_API_KEY}",
+    "cal-api-version": "2024-08-13"
+  },
+  "expectStatus": [404]
+}

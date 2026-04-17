@@ -1,2 +1,0 @@
--- AlterTable
-ALTER TABLE "Membership" ALTER COLUMN "createdAt" SET DEFAULT CURRENT_TIMESTAMP;

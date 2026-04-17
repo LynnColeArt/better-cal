@@ -1,1 +1,0 @@
-UPDATE "App" set categories='{automation}' where slug in ('n8n', 'zapier');
