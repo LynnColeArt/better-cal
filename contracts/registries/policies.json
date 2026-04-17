@@ -40,6 +40,15 @@
       "negativeFixtures": ["unknown-client-id"]
     },
     {
+      "id": "policy.platform-client.read",
+      "status": "draft",
+      "authModes": ["platform-client-secret"],
+      "principalTypes": ["platform-client"],
+      "requiredPermissions": ["platform-client:read"],
+      "resourceResolver": "platform-client-by-client-id",
+      "negativeFixtures": ["api-v2-auth.platform-client.invalid-secret"]
+    },
+    {
       "id": "policy.oauth2.token.exchange",
       "status": "draft",
       "authModes": ["oauth-client", "public-pkce-client"],

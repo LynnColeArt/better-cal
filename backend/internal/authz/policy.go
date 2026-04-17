@@ -5,10 +5,11 @@ import "github.com/LynnColeArt/better-cal/backend/internal/auth"
 type Policy string
 
 const (
-	PolicyMeRead       Policy = "policy.me.read"
-	PolicyOAuth2Read   Policy = "policy.oauth2.client.read"
-	PolicyBookingRead  Policy = "policy.booking.read"
-	PolicyBookingWrite Policy = "policy.booking.write"
+	PolicyMeRead             Policy = "policy.me.read"
+	PolicyOAuth2Read         Policy = "policy.oauth2.client.read"
+	PolicyPlatformClientRead Policy = "policy.platform-client.read"
+	PolicyBookingRead        Policy = "policy.booking.read"
+	PolicyBookingWrite       Policy = "policy.booking.write"
 )
 
 type Decision struct {
@@ -23,10 +24,11 @@ type Authorizer struct {
 func NewAuthorizer() *Authorizer {
 	return &Authorizer{
 		requiredPermissions: map[Policy][]string{
-			PolicyMeRead:       {"me:read"},
-			PolicyOAuth2Read:   {"oauth-client:read"},
-			PolicyBookingRead:  {"booking:read"},
-			PolicyBookingWrite: {"booking:write"},
+			PolicyMeRead:             {"me:read"},
+			PolicyOAuth2Read:         {"oauth-client:read"},
+			PolicyPlatformClientRead: {"platform-client:read"},
+			PolicyBookingRead:        {"booking:read"},
+			PolicyBookingWrite:       {"booking:write"},
 		},
 	}
 }

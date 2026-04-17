@@ -69,6 +69,19 @@
       "fixtureRefs": ["api-v2-auth.api-key.success", "api-v2-auth.api-key.invalid", "api-v2-auth.session.identity-mutation-rejected"]
     },
     {
+      "id": "api-v2.platform-client.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/oauth-clients/{clientId}",
+      "versions": ["2024-08-13"],
+      "status": "draft",
+      "priority": "critical",
+      "spec": "docs/spec/api-v2-auth-spec.md",
+      "policy": "policy.platform-client.read",
+      "schemaRefs": [],
+      "fixtureRefs": ["api-v2-auth.platform-client.success", "api-v2-auth.platform-client.invalid-secret"]
+    },
+    {
       "id": "api-v2.bookings.create",
       "surface": "api-v2",
       "method": "POST",

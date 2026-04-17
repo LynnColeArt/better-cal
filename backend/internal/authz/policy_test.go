@@ -74,7 +74,13 @@ func TestPolicyConstantsExistInContractRegistry(t *testing.T) {
 		registered[policy.ID] = true
 	}
 
-	for _, policy := range []Policy{PolicyMeRead, PolicyOAuth2Read, PolicyBookingRead, PolicyBookingWrite} {
+	for _, policy := range []Policy{
+		PolicyMeRead,
+		PolicyOAuth2Read,
+		PolicyPlatformClientRead,
+		PolicyBookingRead,
+		PolicyBookingWrite,
+	} {
 		if !registered[string(policy)] {
 			t.Fatalf("policy %q is missing from contracts/registries/policies.json", policy)
 		}

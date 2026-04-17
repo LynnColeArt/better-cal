@@ -194,6 +194,10 @@ func (s *Server) platformClient(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid platform client credentials", true)
 		return
 	}
+	if !s.authorize(client.Principal(), authz.PolicyPlatformClientRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
 
 	s.sendJSON(w, r, http.StatusOK, envelope{
 		Status: "success",

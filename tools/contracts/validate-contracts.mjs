@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { checkPolicyCoverage } from "./check-policy-coverage.mjs";
 
 const projectRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const contractsRoot = path.join(projectRoot, "contracts");
@@ -68,9 +69,11 @@ for (const file of [...walk(contractsRoot, () => true), ...walk(specRoot, () => 
   }
 }
 
+problems.push(...checkPolicyCoverage());
+
 if (problems.length > 0) {
   console.error(problems.join("\n"));
   process.exit(1);
 }
 
-console.log(`OK: ${jsonFiles.length} JSON files, schema refs, route refs, and source-neutral checks passed`);
+console.log(`OK: ${jsonFiles.length} JSON files, schema refs, route refs, source-neutral checks, and policy coverage passed`);

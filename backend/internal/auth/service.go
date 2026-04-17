@@ -28,12 +28,20 @@ type OAuthClient struct {
 }
 
 type PlatformClient struct {
-	ID             string
-	Name           string
-	OrganizationID int
-	Permissions    []string
-	CreatedAt      string
-	UpdatedAt      string
+	ID                string
+	Name              string
+	OrganizationID    int
+	Permissions       []string
+	PolicyPermissions []string
+	CreatedAt         string
+	UpdatedAt         string
+}
+
+func (c PlatformClient) Principal() Principal {
+	return Principal{
+		Type:        "platform-client",
+		Permissions: c.PolicyPermissions,
+	}
 }
 
 type Service struct {
@@ -96,12 +104,13 @@ func (s *Service) VerifyPlatformClient(pathClientID string, headerClientID strin
 	}
 
 	return PlatformClient{
-		ID:             s.platformClientID,
-		Name:           "Fixture Platform Client",
-		OrganizationID: 456,
-		Permissions:    []string{"booking:read", "booking:write"},
-		CreatedAt:      "2026-01-01T00:00:00.000Z",
-		UpdatedAt:      "2026-01-01T00:00:00.000Z",
+		ID:                s.platformClientID,
+		Name:              "Fixture Platform Client",
+		OrganizationID:    456,
+		Permissions:       []string{"booking:read", "booking:write"},
+		PolicyPermissions: []string{"platform-client:read"},
+		CreatedAt:         "2026-01-01T00:00:00.000Z",
+		UpdatedAt:         "2026-01-01T00:00:00.000Z",
 	}, true
 }
 
