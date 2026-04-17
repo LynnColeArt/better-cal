@@ -122,10 +122,10 @@ Adapters should not:
 1. Backend skeleton with health route, config, request ids, structured request logging, panic recovery, and API adapter routing. Started in `backend/`.
 2. Fixture runner with strict HTTP response replay and redaction-aware comparison. Started in `tools/fixture-replay/`.
 3. Data contract registries for public schemas, enums, identifiers, stored JSON, and secret classification. Started in `contracts/registries/`.
-4. API v2 auth route compatibility for the starter fixture set. Started in `backend/internal/httpapi/`.
+4. API v2 auth route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with credential verification factored into `backend/internal/auth/`.
 5. Booking lifecycle canary route compatibility for the starter fixture set. Started in `backend/internal/httpapi/`.
 6. Database connection and transaction helpers.
-7. Principal resolver and policy package.
+7. Principal resolver and policy package. Principal fixture resolution has started in `backend/internal/auth/`; durable identity lookup and policy enforcement are next.
 8. One low-risk persisted read route.
 9. Next.js tRPC bridge proof of concept for one query and one mutation.
 10. Slot read fixture replay.

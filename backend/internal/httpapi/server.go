@@ -2,15 +2,13 @@ package httpapi
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/logging"
 )
@@ -21,6 +19,7 @@ const requestIDKey contextKey = "request-id"
 
 type Server struct {
 	cfg         config.Config
+	authService *auth.Service
 	logger      *slog.Logger
 	mux         *http.ServeMux
 	mu          sync.Mutex
@@ -38,6 +37,7 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger) http.Handler {
 	}
 	server := &Server{
 		cfg:         cfg,
+		authService: auth.NewService(cfg),
 		logger:      logger,
 		mux:         http.NewServeMux(),
 		bookings:    make(map[string]booking),
@@ -118,22 +118,15 @@ func decodeJSON(r *http.Request, target any) bool {
 	return json.NewDecoder(r.Body).Decode(target) == nil
 }
 
-func bearerToken(r *http.Request) string {
-	header := r.Header.Get("authorization")
-	if !strings.HasPrefix(header, "Bearer ") {
-		return ""
+func (s *Server) authenticateAPIKey(r *http.Request) (auth.Principal, bool) {
+	return s.authenticator().AuthenticateAPIKey(r.Header.Get("authorization"))
+}
+
+func (s *Server) authenticator() *auth.Service {
+	if s.authService != nil {
+		return s.authService
 	}
-	return strings.TrimPrefix(header, "Bearer ")
-}
-
-func (s *Server) authorized(r *http.Request) bool {
-	return secureEqual(bearerToken(r), s.cfg.APIKey)
-}
-
-func secureEqual(left string, right string) bool {
-	leftHash := sha256.Sum256([]byte(left))
-	rightHash := sha256.Sum256([]byte(right))
-	return subtle.ConstantTimeCompare(leftHash[:], rightHash[:]) == 1
+	return auth.NewService(s.cfg)
 }
 
 func (s *Server) requestID(r *http.Request) string {

@@ -13,7 +13,7 @@ The first implementation slice is deliberately small and fixture-driven. It supp
 - `POST /v2/bookings/{bookingUid}/cancel`
 - `POST /v2/bookings/{bookingUid}/reschedule`
 
-The API shell includes request ID propagation, panic recovery, and structured request logging with secret-bearing headers redacted.
+The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, and a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients.
 
 Run locally:
 

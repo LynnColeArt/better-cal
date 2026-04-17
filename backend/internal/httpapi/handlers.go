@@ -12,7 +12,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	principal, ok := s.authenticateAPIKey(r)
+	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
 		return
 	}
@@ -20,19 +21,19 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	s.sendJSON(w, r, http.StatusOK, envelope{
 		Status: "success",
 		Data: map[string]any{
-			"id":        123,
-			"uuid":      "00000000-0000-4000-8000-000000000123",
-			"username":  "fixture-user",
-			"email":     "fixture-user@example.test",
-			"createdAt": "2026-01-01T00:00:00.000Z",
-			"updatedAt": "2026-01-01T00:00:00.000Z",
+			"id":        principal.ID,
+			"uuid":      principal.UUID,
+			"username":  principal.Username,
+			"email":     principal.Email,
+			"createdAt": principal.CreatedAt,
+			"updatedAt": principal.UpdatedAt,
 			"requestId": s.requestID(r),
 		},
 	})
 }
 
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	if _, ok := s.authenticateAPIKey(r); !ok {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
 		return
 	}
@@ -95,7 +96,7 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	if _, ok := s.authenticateAPIKey(r); !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "", true)
 		return
 	}
@@ -121,7 +122,7 @@ func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	if _, ok := s.authenticateAPIKey(r); !ok {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
 		return
 	}
@@ -164,7 +165,7 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	if _, ok := s.authenticateAPIKey(r); !ok {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
 		return
 	}
@@ -224,13 +225,14 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	if _, ok := s.authenticateAPIKey(r); !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "", false)
 		return
 	}
 
 	clientID := r.PathValue("clientId")
-	if clientID != s.cfg.OAuthClientID {
+	client, ok := s.authenticator().OAuthClient(clientID)
+	if !ok {
 		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "OAuth client not found", true)
 		return
 	}
@@ -238,11 +240,11 @@ func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 	s.sendJSON(w, r, http.StatusOK, envelope{
 		Status: "success",
 		Data: map[string]any{
-			"clientId":     clientID,
-			"name":         "Fixture OAuth Client",
-			"redirectUris": []string{"https://fixture.example.test/callback"},
-			"createdAt":    "2026-01-01T00:00:00.000Z",
-			"updatedAt":    "2026-01-01T00:00:00.000Z",
+			"clientId":     client.ClientID,
+			"name":         client.Name,
+			"redirectUris": client.RedirectURIs,
+			"createdAt":    client.CreatedAt,
+			"updatedAt":    client.UpdatedAt,
 			"requestId":    s.requestID(r),
 		},
 	})
@@ -250,9 +252,12 @@ func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) platformClient(w http.ResponseWriter, r *http.Request) {
 	clientID := r.PathValue("clientId")
-	if clientID != s.cfg.PlatformClientID ||
-		r.Header.Get("x-cal-client-id") != s.cfg.PlatformClientID ||
-		!secureEqual(r.Header.Get("x-cal-secret-key"), s.cfg.PlatformClientSecret) {
+	client, ok := s.authenticator().VerifyPlatformClient(
+		clientID,
+		r.Header.Get("x-cal-client-id"),
+		r.Header.Get("x-cal-secret-key"),
+	)
+	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid platform client credentials", true)
 		return
 	}
@@ -260,12 +265,12 @@ func (s *Server) platformClient(w http.ResponseWriter, r *http.Request) {
 	s.sendJSON(w, r, http.StatusOK, envelope{
 		Status: "success",
 		Data: map[string]any{
-			"id":             s.cfg.PlatformClientID,
-			"name":           "Fixture Platform Client",
-			"organizationId": 456,
-			"permissions":    []string{"booking:read", "booking:write"},
-			"createdAt":      "2026-01-01T00:00:00.000Z",
-			"updatedAt":      "2026-01-01T00:00:00.000Z",
+			"id":             client.ID,
+			"name":           client.Name,
+			"organizationId": client.OrganizationID,
+			"permissions":    client.Permissions,
+			"createdAt":      client.CreatedAt,
+			"updatedAt":      client.UpdatedAt,
 			"requestId":      s.requestID(r),
 		},
 	})
