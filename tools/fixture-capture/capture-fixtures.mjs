@@ -94,7 +94,7 @@ export function buildUrl(baseUrl, template) {
 }
 
 export function headerObject(headers) {
-  const ignoredHeaders = new Set(["connection", "date", "keep-alive", "transfer-encoding"]);
+  const ignoredHeaders = new Set(["connection", "content-length", "date", "keep-alive", "transfer-encoding"]);
   const out = {};
   headers.forEach((value, key) => {
     if (ignoredHeaders.has(key.toLowerCase())) return;

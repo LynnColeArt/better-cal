@@ -119,17 +119,17 @@ Adapters should not:
 
 ## Initial Build Order
 
-1. Backend skeleton with health route, config, request ids, logging, redaction, panic recovery.
-2. Fixture runner with strict, shape, state, side-effect, and security-break comparison modes.
-3. Data contract registries for public schemas, enums, identifiers, stored JSON, and secret classification.
-4. Database connection and transaction helpers.
-5. Principal resolver and policy package.
-6. API v2 auth routes and middleware.
-7. One low-risk read route.
-8. Next.js tRPC bridge proof of concept for one query and one mutation.
-9. Slot read fixture replay.
-10. Booking validation-only service.
-11. Booking write canary path.
+1. Backend skeleton with health route, config, request ids, structured request logging, panic recovery, and API adapter routing. Started in `backend/`.
+2. Fixture runner with strict HTTP response replay and redaction-aware comparison. Started in `tools/fixture-replay/`.
+3. Data contract registries for public schemas, enums, identifiers, stored JSON, and secret classification. Started in `contracts/registries/`.
+4. API v2 auth route compatibility for the starter fixture set. Started in `backend/internal/httpapi/`.
+5. Booking lifecycle canary route compatibility for the starter fixture set. Started in `backend/internal/httpapi/`.
+6. Database connection and transaction helpers.
+7. Principal resolver and policy package.
+8. One low-risk persisted read route.
+9. Next.js tRPC bridge proof of concept for one query and one mutation.
+10. Slot read fixture replay.
+11. Booking validation service with durable state and side-effect ports.
 
 ## Testing Layers
 
