@@ -114,6 +114,14 @@ function runReplay(baseUrl, outputRoot, manifestName) {
   );
 }
 
+function runSecretScan(outputRoot) {
+  return runTool([
+    path.join(projectRoot, "tools", "contracts", "scan-secrets.mjs"),
+    "--path",
+    outputRoot,
+  ]);
+}
+
 function buildBackend(binaryPath) {
   return runCommand("go", ["build", "-o", binaryPath, "./cmd/api"], {}, path.join(projectRoot, "backend"));
 }
@@ -191,6 +199,7 @@ try {
   assertOK(await runCapture(mockBaseUrl, outputRoot, "booking-lifecycle.json"), "booking capture");
   assertOK(await runReview(outputRoot, "api-v2-auth.json"), "auth review");
   assertOK(await runReview(outputRoot, "booking-lifecycle.json"), "booking review");
+  assertOK(await runSecretScan(outputRoot), "secret scan");
   await close(mockServer);
   mockServer = undefined;
 

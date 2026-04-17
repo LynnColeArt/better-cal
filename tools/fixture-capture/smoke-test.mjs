@@ -124,6 +124,14 @@ function runReplay(baseUrl, outputRoot, manifestName) {
   );
 }
 
+function runSecretScan(outputRoot) {
+  return runTool([
+    path.join(projectRoot, "tools", "contracts", "scan-secrets.mjs"),
+    "--path",
+    outputRoot,
+  ]);
+}
+
 let server = createMockApiV2Server();
 const outputRoot = mkdtempSync(path.join(tmpdir(), "caldiy-fixture-smoke-"));
 
@@ -135,6 +143,7 @@ try {
   const bookingReviewResult = await runReview(outputRoot, "booking-lifecycle.json", ["--write-schemas"]);
   const authApprovalDryRun = await runReview(outputRoot, "api-v2-auth.json", ["--approve-all-captured", "--dry-run"]);
   const bookingApprovalDryRun = await runReview(outputRoot, "booking-lifecycle.json", ["--approve-all-captured", "--dry-run"]);
+  const secretScanResult = await runSecretScan(outputRoot);
   await close(server);
   server = createMockApiV2Server();
   const replayBaseUrl = await listen(server);
@@ -147,6 +156,7 @@ try {
     bookingReviewResult,
     authApprovalDryRun,
     bookingApprovalDryRun,
+    secretScanResult,
     authReplayResult,
     bookingReplayResult,
   ];
