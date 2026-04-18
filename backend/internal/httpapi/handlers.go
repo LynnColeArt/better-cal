@@ -204,7 +204,11 @@ func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientID := r.PathValue("clientId")
-	client, ok := s.authenticator().OAuthClient(clientID)
+	client, ok, err := s.authenticator().OAuthClientContext(r.Context(), clientID)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "OAuth client not found", true)
 		return

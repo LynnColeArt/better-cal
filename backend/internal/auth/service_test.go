@@ -91,6 +91,42 @@ func TestOAuthClientLookup(t *testing.T) {
 	}
 }
 
+func TestOAuthClientUsesRepositoryWhenConfigured(t *testing.T) {
+	service := NewService(testConfig(), WithOAuthClientRepository(&fakeOAuthClientRepository{
+		byID: map[string]OAuthClient{
+			"db-oauth-client": FixtureOAuthClient("db-oauth-client"),
+		},
+	}))
+
+	client, ok, err := service.OAuthClientContext(context.Background(), "db-oauth-client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected repository oauth client")
+	}
+	if client.ClientID != "db-oauth-client" {
+		t.Fatalf("client id = %q", client.ClientID)
+	}
+
+	if _, ok, err := service.OAuthClientContext(context.Background(), "mock-oauth-client"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("config oauth client unexpectedly resolved while repository was configured")
+	}
+}
+
+func TestOAuthClientReturnsRepositoryErrors(t *testing.T) {
+	sentinel := errors.New("oauth repository unavailable")
+	service := NewService(testConfig(), WithOAuthClientRepository(&fakeOAuthClientRepository{
+		err: sentinel,
+	}))
+
+	if _, _, err := service.OAuthClientContext(context.Background(), "db-oauth-client"); !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestVerifyPlatformClientRequiresAllCredentials(t *testing.T) {
 	service := NewService(testConfig())
 
@@ -152,4 +188,17 @@ func (r *fakeAPIKeyPrincipalRepository) ReadAPIKeyPrincipal(_ context.Context, t
 	}
 	principal, ok := r.byToken[token]
 	return principal, ok, nil
+}
+
+type fakeOAuthClientRepository struct {
+	byID map[string]OAuthClient
+	err  error
+}
+
+func (r *fakeOAuthClientRepository) ReadOAuthClient(_ context.Context, clientID string) (OAuthClient, bool, error) {
+	if r.err != nil {
+		return OAuthClient{}, false, r.err
+	}
+	client, ok := r.byID[clientID]
+	return client, ok, nil
 }

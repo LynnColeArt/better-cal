@@ -37,14 +37,23 @@ func main() {
 			slog.Error("database migration failed", "error", err)
 			os.Exit(1)
 		}
-		principalRepository := auth.NewPostgresPrincipalRepository(pool)
-		if err := principalRepository.SaveAPIKeyPrincipal(ctx, cfg.APIKey, auth.FixtureAPIKeyPrincipal()); err != nil {
+		authRepository := auth.NewPostgresRepository(pool)
+		if err := authRepository.SaveAPIKeyPrincipal(ctx, cfg.APIKey, auth.FixtureAPIKeyPrincipal()); err != nil {
 			cancel()
 			slog.Error("api key principal seed failed", "error", err)
 			os.Exit(1)
 		}
+		if err := authRepository.SaveOAuthClient(ctx, auth.FixtureOAuthClient(cfg.OAuthClientID)); err != nil {
+			cancel()
+			slog.Error("oauth client seed failed", "error", err)
+			os.Exit(1)
+		}
 		serverOptions = append(serverOptions, httpapi.WithAuthService(
-			auth.NewService(cfg, auth.WithAPIKeyPrincipalRepository(principalRepository)),
+			auth.NewService(
+				cfg,
+				auth.WithAPIKeyPrincipalRepository(authRepository),
+				auth.WithOAuthClientRepository(authRepository),
+			),
 		))
 		serverOptions = append(serverOptions, httpapi.WithBookingStore(
 			booking.NewStoreWithRepository(booking.NewPostgresRepository(pool)),

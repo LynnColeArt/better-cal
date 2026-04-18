@@ -51,6 +51,7 @@ type Service struct {
 	platformClientID     string
 	platformClientSecret string
 	apiKeyPrincipals     APIKeyPrincipalRepository
+	oauthClients         OAuthClientRepository
 }
 
 type ServiceOption func(*Service)
@@ -58,6 +59,12 @@ type ServiceOption func(*Service)
 func WithAPIKeyPrincipalRepository(repo APIKeyPrincipalRepository) ServiceOption {
 	return func(s *Service) {
 		s.apiKeyPrincipals = repo
+	}
+}
+
+func WithOAuthClientRepository(repo OAuthClientRepository) ServiceOption {
+	return func(s *Service) {
+		s.oauthClients = repo
 	}
 }
 
@@ -114,17 +121,33 @@ func FixtureAPIKeyPrincipal() Principal {
 }
 
 func (s *Service) OAuthClient(clientID string) (OAuthClient, bool) {
-	if clientID != s.oauthClientID {
-		return OAuthClient{}, false
+	client, ok, _ := s.OAuthClientContext(context.Background(), clientID)
+	return client, ok
+}
+
+func (s *Service) OAuthClientContext(ctx context.Context, clientID string) (OAuthClient, bool, error) {
+	if s.oauthClients != nil {
+		if clientID == "" {
+			return OAuthClient{}, false, nil
+		}
+		return s.oauthClients.ReadOAuthClient(ctx, clientID)
 	}
 
+	if clientID != s.oauthClientID {
+		return OAuthClient{}, false, nil
+	}
+
+	return FixtureOAuthClient(clientID), true, nil
+}
+
+func FixtureOAuthClient(clientID string) OAuthClient {
 	return OAuthClient{
 		ClientID:     clientID,
 		Name:         "Fixture OAuth Client",
 		RedirectURIs: []string{"https://fixture.example.test/callback"},
 		CreatedAt:    "2026-01-01T00:00:00.000Z",
 		UpdatedAt:    "2026-01-01T00:00:00.000Z",
-	}, true
+	}
 }
 
 func (s *Service) VerifyPlatformClient(pathClientID string, headerClientID string, secret string) (PlatformClient, bool) {

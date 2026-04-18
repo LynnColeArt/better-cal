@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestPostgresPrincipalRepositoryPersistsAPIKeyPrincipal(t *testing.T) {
+func TestPostgresRepositoryPersistsAPIKeyPrincipal(t *testing.T) {
 	pool := testPostgresPrincipalPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	repo := NewPostgresPrincipalRepository(pool)
+	repo := NewPostgresRepository(pool)
 	token := fmt.Sprintf("principal-token-%d", time.Now().UnixNano())
 	tokenHash := apiKeyTokenHash(token)
 	t.Cleanup(func() {
@@ -73,13 +73,85 @@ func TestPostgresPrincipalRepositoryPersistsAPIKeyPrincipal(t *testing.T) {
 	}
 }
 
-func TestPostgresPrincipalRepositoryRejectsEmptyToken(t *testing.T) {
+func TestPostgresRepositoryRejectsEmptyToken(t *testing.T) {
 	pool := testPostgresPrincipalPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	repo := NewPostgresPrincipalRepository(pool)
+	repo := NewPostgresRepository(pool)
 	if err := repo.SaveAPIKeyPrincipal(ctx, "", FixtureAPIKeyPrincipal()); !errors.Is(err, ErrEmptyAPIKey) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPostgresRepositoryPersistsOAuthClientMetadata(t *testing.T) {
+	pool := testPostgresPrincipalPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	clientID := fmt.Sprintf("oauth-client-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from oauth_clients where client_id = $1`, clientID)
+	})
+
+	client := FixtureOAuthClient(clientID)
+	client.RedirectURIs = []string{
+		"https://fixture.example.test/callback",
+		"https://fixture.example.test/secondary-callback",
+	}
+	if err := repo.SaveOAuthClient(ctx, client); err != nil {
+		t.Fatal(err)
+	}
+
+	var secretColumnCount int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from information_schema.columns
+		where table_name = 'oauth_clients' and column_name ilike '%secret%'
+	`).Scan(&secretColumnCount); err != nil {
+		t.Fatal(err)
+	}
+	if secretColumnCount != 0 {
+		t.Fatal("oauth client metadata table has a secret-like column")
+	}
+
+	found, ok, err := repo.ReadOAuthClient(ctx, clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("oauth client was not found")
+	}
+	if found.ClientID != clientID {
+		t.Fatalf("client id = %q", found.ClientID)
+	}
+	if found.Name != "Fixture OAuth Client" {
+		t.Fatalf("name = %q", found.Name)
+	}
+	if len(found.RedirectURIs) != 2 || found.RedirectURIs[1] != "https://fixture.example.test/secondary-callback" {
+		t.Fatalf("redirect uris = %#v", found.RedirectURIs)
+	}
+	if found.CreatedAt != "2026-01-01T00:00:00.000Z" {
+		t.Fatalf("created at = %q", found.CreatedAt)
+	}
+
+	if _, ok, err := repo.ReadOAuthClient(ctx, clientID+"-missing"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("missing oauth client unexpectedly found")
+	}
+}
+
+func TestPostgresRepositoryRejectsEmptyOAuthClientID(t *testing.T) {
+	pool := testPostgresPrincipalPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	if err := repo.SaveOAuthClient(ctx, FixtureOAuthClient("")); !errors.Is(err, ErrEmptyOAuthClientID) {
 		t.Fatalf("err = %v", err)
 	}
 }

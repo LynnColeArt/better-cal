@@ -93,6 +93,19 @@ func TestAuthRepositoryErrorReturnsInternalError(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer cal_test_valid_mock", nil, http.StatusInternalServerError)
 }
 
+func TestOAuthClientRepositoryErrorReturnsInternalError(t *testing.T) {
+	service := auth.NewService(
+		testConfig(),
+		auth.WithAPIKeyPrincipalRepository(validAPIKeyPrincipals{}),
+		auth.WithOAuthClientRepository(erroringOAuthClients{}),
+	)
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodGet, "/v2/auth/oauth2/clients/mock-oauth-client", "Bearer cal_test_valid_mock", nil, http.StatusInternalServerError)
+}
+
 func assertStatus(t *testing.T, baseURL string, method string, path string, authorization string, body any, expected int) {
 	t.Helper()
 	var requestBody *bytes.Reader
@@ -139,4 +152,16 @@ type erroringAPIKeyPrincipals struct{}
 
 func (erroringAPIKeyPrincipals) ReadAPIKeyPrincipal(context.Context, string) (auth.Principal, bool, error) {
 	return auth.Principal{}, false, errors.New("repository unavailable")
+}
+
+type validAPIKeyPrincipals struct{}
+
+func (validAPIKeyPrincipals) ReadAPIKeyPrincipal(context.Context, string) (auth.Principal, bool, error) {
+	return auth.FixtureAPIKeyPrincipal(), true, nil
+}
+
+type erroringOAuthClients struct{}
+
+func (erroringOAuthClients) ReadOAuthClient(context.Context, string) (auth.OAuthClient, bool, error) {
+	return auth.OAuthClient{}, false, errors.New("oauth repository unavailable")
 }

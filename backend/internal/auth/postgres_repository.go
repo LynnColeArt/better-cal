@@ -15,20 +15,25 @@ import (
 const wireTimeLayout = "2006-01-02T15:04:05.000Z"
 
 var ErrEmptyAPIKey = errors.New("empty api key")
+var ErrEmptyOAuthClientID = errors.New("empty oauth client id")
 
 type APIKeyPrincipalRepository interface {
 	ReadAPIKeyPrincipal(ctx context.Context, token string) (Principal, bool, error)
 }
 
-type PostgresPrincipalRepository struct {
+type OAuthClientRepository interface {
+	ReadOAuthClient(ctx context.Context, clientID string) (OAuthClient, bool, error)
+}
+
+type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-func NewPostgresPrincipalRepository(pool *pgxpool.Pool) *PostgresPrincipalRepository {
-	return &PostgresPrincipalRepository{pool: pool}
+func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
+	return &PostgresRepository{pool: pool}
 }
 
-func (r *PostgresPrincipalRepository) ReadAPIKeyPrincipal(ctx context.Context, token string) (Principal, bool, error) {
+func (r *PostgresRepository) ReadAPIKeyPrincipal(ctx context.Context, token string) (Principal, bool, error) {
 	if token == "" {
 		return Principal{}, false, nil
 	}
@@ -62,7 +67,7 @@ func (r *PostgresPrincipalRepository) ReadAPIKeyPrincipal(ctx context.Context, t
 	return principal, true, nil
 }
 
-func (r *PostgresPrincipalRepository) SaveAPIKeyPrincipal(ctx context.Context, token string, principal Principal) error {
+func (r *PostgresRepository) SaveAPIKeyPrincipal(ctx context.Context, token string, principal Principal) error {
 	if token == "" {
 		return ErrEmptyAPIKey
 	}
@@ -105,6 +110,76 @@ func (r *PostgresPrincipalRepository) SaveAPIKeyPrincipal(ctx context.Context, t
 			updated_at = now()
 	`, apiKeyTokenHash(token), principal.ID, principal.UUID, principal.Type, principal.Username, principal.Email, permissions, createdAt, updatedAt); err != nil {
 		return fmt.Errorf("save api key principal: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) ReadOAuthClient(ctx context.Context, clientID string) (OAuthClient, bool, error) {
+	if clientID == "" {
+		return OAuthClient{}, false, nil
+	}
+
+	var client OAuthClient
+	var createdAt time.Time
+	var updatedAt time.Time
+	err := r.pool.QueryRow(ctx, `
+		select client_id, name, redirect_uris, client_created_at, client_updated_at
+		from oauth_clients
+		where client_id = $1
+	`, clientID).Scan(
+		&client.ClientID,
+		&client.Name,
+		&client.RedirectURIs,
+		&createdAt,
+		&updatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OAuthClient{}, false, nil
+	}
+	if err != nil {
+		return OAuthClient{}, false, fmt.Errorf("read oauth client: %w", err)
+	}
+
+	client.CreatedAt = formatWireTime(createdAt)
+	client.UpdatedAt = formatWireTime(updatedAt)
+	return client, true, nil
+}
+
+func (r *PostgresRepository) SaveOAuthClient(ctx context.Context, client OAuthClient) error {
+	if client.ClientID == "" {
+		return ErrEmptyOAuthClientID
+	}
+
+	createdAt, err := parseWireTime(client.CreatedAt)
+	if err != nil {
+		return err
+	}
+	updatedAt, err := parseWireTime(client.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	redirectURIs := client.RedirectURIs
+	if redirectURIs == nil {
+		redirectURIs = []string{}
+	}
+
+	if _, err := r.pool.Exec(ctx, `
+		insert into oauth_clients (
+			client_id,
+			name,
+			redirect_uris,
+			client_created_at,
+			client_updated_at
+		)
+		values ($1, $2, $3, $4, $5)
+		on conflict (client_id) do update set
+			name = excluded.name,
+			redirect_uris = excluded.redirect_uris,
+			client_created_at = excluded.client_created_at,
+			client_updated_at = excluded.client_updated_at,
+			updated_at = now()
+	`, client.ClientID, client.Name, redirectURIs, createdAt, updatedAt); err != nil {
+		return fmt.Errorf("save oauth client: %w", err)
 	}
 	return nil
 }
