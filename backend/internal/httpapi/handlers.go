@@ -66,7 +66,7 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 
 	created, duplicate, err := s.bookings().Create(r.Context(), s.requestID(r), body)
 	if err != nil {
-		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		s.sendBookingServiceError(w, r, err)
 		return
 	}
 	status := http.StatusCreated
@@ -129,7 +129,7 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 	uid := r.PathValue("bookingUid")
 	result, ok, err := s.bookings().Cancel(r.Context(), s.requestID(r), uid, body)
 	if err != nil {
-		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		s.sendBookingServiceError(w, r, err)
 		return
 	}
 	if !ok {
@@ -168,7 +168,7 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 	oldUID := r.PathValue("bookingUid")
 	result, ok, err := s.bookings().Reschedule(r.Context(), s.requestID(r), oldUID, body)
 	if err != nil {
-		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		s.sendBookingServiceError(w, r, err)
 		return
 	}
 	if !ok {
@@ -260,4 +260,12 @@ func (s *Server) platformClient(w http.ResponseWriter, r *http.Request) {
 			"requestId":      s.requestID(r),
 		},
 	})
+}
+
+func (s *Server) sendBookingServiceError(w http.ResponseWriter, r *http.Request, serviceErr error) {
+	if validationErr, ok := booking.ValidationFromError(serviceErr); ok {
+		s.sendError(w, r, http.StatusBadRequest, validationErr.Code, validationErr.Message, true)
+		return
+	}
+	s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
 }

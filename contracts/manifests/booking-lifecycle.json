@@ -94,6 +94,21 @@
       "redactions": ["authorization", "attendee.email"],
       "unstableFields": ["requestId"],
       "owner": "security"
+    },
+    {
+      "id": "booking.create.secret-field-denied",
+      "surface": "api-v2",
+      "operation": "POST /v2/bookings",
+      "status": "needs-capture",
+      "auth": "api-key",
+      "comparison": "security-break",
+      "securityBreaks": ["reject-secret-bearing-echo-fields"],
+      "inputs": [],
+      "outputs": [],
+      "schemas": [],
+      "redactions": ["authorization", "metadata.clientSecret"],
+      "unstableFields": ["requestId"],
+      "owner": "security"
     }
   ]
 }

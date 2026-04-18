@@ -6,6 +6,27 @@ const jsonHeaders = {
   "x-request-id": "mock-request-id",
 };
 
+const secretEchoFields = new Set([
+  "authorization",
+  "apikey",
+  "key",
+  "plaintextkey",
+  "clientsecret",
+  "client_secret",
+  "access_token",
+  "accesstoken",
+  "refresh_token",
+  "refreshtoken",
+  "credential",
+  "credentials",
+  "providertoken",
+  "webhooksecret",
+  "password",
+  "newpassword",
+  "currentpassword",
+  "secret",
+]);
+
 function sendJson(res, status, body) {
   res.writeHead(status, jsonHeaders);
   res.end(`${JSON.stringify(body)}\n`);
@@ -57,6 +78,15 @@ function bookingPayload(overrides = {}) {
     requestId: "mock-request-id",
     ...overrides,
   };
+}
+
+function hasSecretEchoField(value) {
+  if (Array.isArray(value)) return value.some((item) => hasSecretEchoField(item));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, child]) => {
+    const normalizedKey = key.toLowerCase();
+    return secretEchoFields.has(normalizedKey) || hasSecretEchoField(child);
+  });
 }
 
 function authorized(req) {
@@ -125,6 +155,18 @@ export function createMockApiV2Server() {
       }
 
       const body = await readJsonBody(req);
+      if (hasSecretEchoField(body.responses) || hasSecretEchoField(body.metadata)) {
+        sendJson(res, 400, {
+          status: "error",
+          error: {
+            code: "SECRET_FIELD_NOT_ALLOWED",
+            message: "Secret-bearing fields are not allowed in booking responses or metadata",
+            requestId: "mock-request-id",
+          },
+        });
+        return;
+      }
+
       const idempotencyKey = body.idempotencyKey;
       if (idempotencyKey && idempotency.has(idempotencyKey)) {
         sendJson(res, 200, {

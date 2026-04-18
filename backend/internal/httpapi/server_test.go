@@ -60,6 +60,36 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings", "Bearer cal_test_unauthorized_mock", createBody, http.StatusForbidden)
 }
 
+func TestBookingValidationErrorReturnsBadRequestWithoutEchoingSecret(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v2/bookings", bytes.NewReader([]byte(`{
+		"eventTypeId": 1001,
+		"start": "2026-05-01T15:00:00.000Z",
+		"metadata": {
+			"clientSecret": "super-secret-fixture"
+		}
+	}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("authorization", "Bearer cal_test_valid_mock")
+	req.Header.Set("content-type", "application/json")
+
+	resp, body := do(t, req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"code":"SECRET_FIELD_NOT_ALLOWED"`)) {
+		t.Fatalf("body did not contain validation code: %s", body)
+	}
+	if bytes.Contains(body, []byte("super-secret-fixture")) {
+		t.Fatalf("validation response echoed secret: %s", body)
+	}
+}
+
 func TestRequestIDPropagatesToResponse(t *testing.T) {
 	handler := NewServer(testConfig())
 	server := httptest.NewServer(handler)

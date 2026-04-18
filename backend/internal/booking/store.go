@@ -8,6 +8,7 @@ import (
 const (
 	PrimaryFixtureUID     = "mock-booking-personal-basic"
 	RescheduledFixtureUID = "mock-booking-rescheduled"
+	FixtureEventTypeID    = 1001
 )
 
 type Attendee struct {
@@ -63,16 +64,18 @@ type RescheduleResult struct {
 }
 
 type Store struct {
-	mu          sync.Mutex
-	repo        Repository
-	bookings    map[string]Booking
-	idempotency map[string]string
+	mu               sync.Mutex
+	repo             Repository
+	bookingValidator BookingValidator
+	bookings         map[string]Booking
+	idempotency      map[string]string
 }
 
 func NewStore() *Store {
 	return &Store{
-		bookings:    make(map[string]Booking),
-		idempotency: make(map[string]string),
+		bookingValidator: DefaultValidator{},
+		bookings:         make(map[string]Booking),
+		idempotency:      make(map[string]string),
 	}
 }
 
@@ -105,6 +108,9 @@ func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest)
 				return bookingValue, true, nil
 			}
 		}
+	}
+	if err := s.validator().ValidateCreate(req); err != nil {
+		return Booking{}, false, err
 	}
 
 	attendeeValue := req.Attendee
@@ -161,7 +167,7 @@ func (s *Store) Read(ctx context.Context, requestID string, uid string) (Booking
 	return s.findLocked(ctx, requestID, uid)
 }
 
-func (s *Store) Cancel(ctx context.Context, requestID string, uid string, _ CancelRequest) (CancelResult, bool, error) {
+func (s *Store) Cancel(ctx context.Context, requestID string, uid string, req CancelRequest) (CancelResult, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -171,6 +177,9 @@ func (s *Store) Cancel(ctx context.Context, requestID string, uid string, _ Canc
 	}
 	if !ok {
 		return CancelResult{}, false, nil
+	}
+	if err := s.validator().ValidateCancel(req); err != nil {
+		return CancelResult{}, false, err
 	}
 
 	cancelled := fixtureBooking(requestID, mergeBooking(existing, Booking{
@@ -204,6 +213,9 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 	}
 	if !ok {
 		return RescheduleResult{}, false, nil
+	}
+	if err := s.validator().ValidateReschedule(req); err != nil {
+		return RescheduleResult{}, false, err
 	}
 
 	oldBooking := fixtureBooking(requestID, mergeBooking(existing, Booking{
@@ -248,7 +260,7 @@ func fixtureBooking(requestID string, overrides Booking) Booking {
 		Status:      "accepted",
 		Start:       "2026-05-01T15:00:00.000Z",
 		End:         "2026-05-01T15:30:00.000Z",
-		EventTypeID: 1001,
+		EventTypeID: FixtureEventTypeID,
 		Attendees: []Attendee{
 			{
 				ID:       321,
@@ -343,4 +355,11 @@ func (s *Store) findLocked(ctx context.Context, requestID string, uid string) (B
 	}
 	s.bookings[created.UID] = created
 	return created, true, nil
+}
+
+func (s *Store) validator() BookingValidator {
+	if s.bookingValidator != nil {
+		return s.bookingValidator
+	}
+	return DefaultValidator{}
 }
