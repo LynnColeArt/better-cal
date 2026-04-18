@@ -21,3 +21,19 @@ node tools/backend-smoke/smoke-test.mjs
 ```
 
 The fixture smoke test captures synthetic API v2 auth and booking fixtures, reviews redaction and schemas, dry-runs approval, and replays the captured fixtures. The backend smoke test replays those same contracts against the starter Go API service.
+
+## Docker Compose
+
+Run the local API and Postgres stack:
+
+```bash
+docker compose up --build
+```
+
+The API listens on `http://localhost:8080`; Postgres is exposed on `localhost:54320` for local tooling. The backend receives `CALDIY_DATABASE_URL`, but the current implementation still uses in-memory fixture state until the persistence slice lands.
+
+Run contract validation inside Compose:
+
+```bash
+docker compose --profile tools run --rm contracts
+```

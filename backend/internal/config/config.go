@@ -12,6 +12,7 @@ const (
 
 type Config struct {
 	Addr                 string
+	DatabaseURL          string
 	APIKey               string
 	OAuthClientID        string
 	PlatformClientID     string
@@ -29,6 +30,7 @@ func FromEnv() Config {
 
 	return Config{
 		Addr:                 addr,
+		DatabaseURL:          os.Getenv("CALDIY_DATABASE_URL"),
 		APIKey:               env("CALDIY_API_KEY", defaultAPIKey),
 		OAuthClientID:        env("CALDIY_OAUTH_CLIENT_ID", defaultOAuthClientID),
 		PlatformClientID:     env("CALDIY_PLATFORM_CLIENT_ID", defaultPlatformClientID),

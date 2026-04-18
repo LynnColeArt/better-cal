@@ -1,0 +1,55 @@
+name: better-cal
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      CALDIY_API_KEY: cal_test_valid_mock
+      CALDIY_OAUTH_CLIENT_ID: mock-oauth-client
+      CALDIY_PLATFORM_CLIENT_ID: mock-platform-client
+      CALDIY_PLATFORM_CLIENT_SECRET: mock-platform-secret
+      CALDIY_REQUEST_ID: mock-request-id
+      CALDIY_DATABASE_URL: postgres://better_cal:better_cal_dev@postgres:5432/better_cal?sslmode=disable
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: better_cal
+      POSTGRES_USER: better_cal
+      POSTGRES_PASSWORD: better_cal_dev
+    ports:
+      - "54320:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U better_cal -d better_cal"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  contracts:
+    image: node:22-alpine
+    profiles: ["tools"]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:ro
+    command: ["node", "tools/contracts/validate-contracts.mjs"]
+
+volumes:
+  postgres-data:

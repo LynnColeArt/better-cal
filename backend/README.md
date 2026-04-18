@@ -22,6 +22,12 @@ cd backend
 go run ./cmd/api
 ```
 
+Run with Docker Compose from the repository root:
+
+```bash
+docker compose up --build
+```
+
 Run Go tests:
 
 ```bash
