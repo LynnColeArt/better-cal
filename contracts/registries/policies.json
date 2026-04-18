@@ -83,6 +83,15 @@
       "requiredPermissions": ["booking:host-action"],
       "resourceResolver": "booking-host-or-platform-permission",
       "negativeFixtures": ["not-host", "wrong-team", "insufficient-permission"]
+    },
+    {
+      "id": "policy.slots.read",
+      "status": "draft",
+      "authModes": ["none"],
+      "principalTypes": ["anonymous"],
+      "requiredPermissions": [],
+      "resourceResolver": "public-event-type-slots",
+      "negativeFixtures": ["unknown-event-type", "private-event-type"]
     }
   ]
 }

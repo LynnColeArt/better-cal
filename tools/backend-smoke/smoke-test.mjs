@@ -197,8 +197,10 @@ try {
   const mockBaseUrl = await listen(mockServer);
   assertOK(await runCapture(mockBaseUrl, outputRoot, "api-v2-auth.json"), "auth capture");
   assertOK(await runCapture(mockBaseUrl, outputRoot, "booking-lifecycle.json"), "booking capture");
+  assertOK(await runCapture(mockBaseUrl, outputRoot, "slots.json"), "slots capture");
   assertOK(await runReview(outputRoot, "api-v2-auth.json"), "auth review");
   assertOK(await runReview(outputRoot, "booking-lifecycle.json"), "booking review");
+  assertOK(await runReview(outputRoot, "slots.json"), "slots review");
   assertOK(await runSecretScan(outputRoot), "secret scan");
   await close(mockServer);
   mockServer = undefined;
@@ -212,11 +214,14 @@ try {
 
   const authReplay = await runReplay(goBaseUrl, outputRoot, "api-v2-auth.json");
   const bookingReplay = await runReplay(goBaseUrl, outputRoot, "booking-lifecycle.json");
+  const slotsReplay = await runReplay(goBaseUrl, outputRoot, "slots.json");
   assertOK(authReplay, "auth replay");
   assertOK(bookingReplay, "booking replay");
+  assertOK(slotsReplay, "slots replay");
 
   console.log(authReplay.stdout.trim());
   console.log(bookingReplay.stdout.trim());
+  console.log(slotsReplay.stdout.trim());
   console.log(`OK: Go backend replay smoke test used ${outputRoot}`);
 } finally {
   if (mockServer?.listening) await close(mockServer);

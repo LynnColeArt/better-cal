@@ -141,26 +141,34 @@ try {
   const baseUrl = await listen(server);
   const authResult = await runCapture(baseUrl, outputRoot, "api-v2-auth.json");
   const bookingResult = await runCapture(baseUrl, outputRoot, "booking-lifecycle.json");
+  const slotsResult = await runCapture(baseUrl, outputRoot, "slots.json");
   const authReviewResult = await runReview(outputRoot, "api-v2-auth.json", ["--write-schemas"]);
   const bookingReviewResult = await runReview(outputRoot, "booking-lifecycle.json", ["--write-schemas"]);
+  const slotsReviewResult = await runReview(outputRoot, "slots.json", ["--write-schemas"]);
   const authApprovalDryRun = await runReview(outputRoot, "api-v2-auth.json", ["--approve-all-captured", "--dry-run"]);
   const bookingApprovalDryRun = await runReview(outputRoot, "booking-lifecycle.json", ["--approve-all-captured", "--dry-run"]);
+  const slotsApprovalDryRun = await runReview(outputRoot, "slots.json", ["--approve-all-captured", "--dry-run"]);
   const secretScanResult = await runSecretScan(outputRoot);
   await close(server);
   server = createMockApiV2Server();
   const replayBaseUrl = await listen(server);
   const authReplayResult = await runReplay(replayBaseUrl, outputRoot, "api-v2-auth.json");
   const bookingReplayResult = await runReplay(replayBaseUrl, outputRoot, "booking-lifecycle.json");
+  const slotsReplayResult = await runReplay(replayBaseUrl, outputRoot, "slots.json");
   const results = [
     authResult,
     bookingResult,
+    slotsResult,
     authReviewResult,
     bookingReviewResult,
+    slotsReviewResult,
     authApprovalDryRun,
     bookingApprovalDryRun,
+    slotsApprovalDryRun,
     secretScanResult,
     authReplayResult,
     bookingReplayResult,
+    slotsReplayResult,
   ];
   const combinedStdout = results.map((result) => result.stdout).join("");
   const combinedStderr = results.map((result) => result.stderr).join("");
@@ -186,6 +194,7 @@ try {
   assertCaptured(outputRoot, "booking-lifecycle", "booking.reschedule.owner", 200);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.unauthorized-user-denied", 403);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.secret-field-denied", 400);
+  assertCaptured(outputRoot, "slots", "slots.read.personal-basic", 200);
 
   console.log(combinedStdout.trim());
   console.log(`OK: fixture capture smoke test wrote redacted output to ${outputRoot}`);

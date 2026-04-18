@@ -82,6 +82,19 @@
       "fixtureRefs": ["api-v2-auth.platform-client.success", "api-v2-auth.platform-client.invalid-secret"]
     },
     {
+      "id": "api-v2.slots.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/slots",
+      "versions": ["2024-04-15", "2024-09-04"],
+      "status": "draft",
+      "priority": "critical",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.slots.read",
+      "schemaRefs": ["schema.api-v2.slots.response"],
+      "fixtureRefs": ["slots.read.personal-basic"]
+    },
+    {
       "id": "api-v2.bookings.create",
       "surface": "api-v2",
       "method": "POST",

@@ -121,6 +121,7 @@ func FixtureAPIKeyPrincipal() Principal {
 			"oauth-client:read",
 			"booking:read",
 			"booking:write",
+			"slots:read",
 		},
 		CreatedAt: "2026-01-01T00:00:00.000Z",
 		UpdatedAt: "2026-01-01T00:00:00.000Z",

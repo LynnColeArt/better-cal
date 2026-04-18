@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
+	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +43,31 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			"requestId": s.requestID(r),
 		},
 	})
+}
+
+func (s *Server) readSlots(w http.ResponseWriter, r *http.Request) {
+	eventTypeID, err := parseOptionalInt(r.URL.Query().Get("eventTypeId"))
+	if err != nil {
+		s.sendError(w, r, http.StatusBadRequest, "INVALID_EVENT_TYPE", "Event type must be an integer", true)
+		return
+	}
+
+	result, ok, err := s.slots().ReadAvailable(r.Context(), s.requestID(r), slots.Request{
+		EventTypeID: eventTypeID,
+		Start:       r.URL.Query().Get("start"),
+		End:         r.URL.Query().Get("end"),
+		TimeZone:    r.URL.Query().Get("timeZone"),
+	})
+	if err != nil {
+		s.sendSlotServiceError(w, r, err)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "Slots not found", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{Status: "success", Data: result})
 }
 
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
@@ -268,4 +295,23 @@ func (s *Server) sendBookingServiceError(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+}
+
+func (s *Server) sendSlotServiceError(w http.ResponseWriter, r *http.Request, serviceErr error) {
+	if validationErr, ok := slots.ValidationFromError(serviceErr); ok {
+		s.sendError(w, r, http.StatusBadRequest, validationErr.Code, validationErr.Message, true)
+		return
+	}
+	s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+}
+
+func parseOptionalInt(value string) (int, error) {
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	return parsed, nil
 }

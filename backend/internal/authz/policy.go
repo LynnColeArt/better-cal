@@ -10,6 +10,7 @@ const (
 	PolicyPlatformClientRead Policy = "policy.platform-client.read"
 	PolicyBookingRead        Policy = "policy.booking.read"
 	PolicyBookingWrite       Policy = "policy.booking.write"
+	PolicySlotsRead          Policy = "policy.slots.read"
 )
 
 type Decision struct {
@@ -29,6 +30,7 @@ func NewAuthorizer() *Authorizer {
 			PolicyPlatformClientRead: {"platform-client:read"},
 			PolicyBookingRead:        {"booking:read"},
 			PolicyBookingWrite:       {"booking:write"},
+			PolicySlotsRead:          {},
 		},
 	}
 }

@@ -120,6 +120,7 @@ Goal: port the scheduling core before booking writes.
 Deliverables:
 
 - schedule and availability services;
+- slot lookup by event type, time range, and timezone; the first `GET /v2/slots` canary is now captured and served by `backend/internal/slots/`;
 - busy-time provider ports for internal bookings and external calendars;
 - selected-calendar and destination-calendar handling;
 - timezone and DST test suite;

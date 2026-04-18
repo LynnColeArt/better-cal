@@ -80,6 +80,25 @@ function bookingPayload(overrides = {}) {
   };
 }
 
+function slotsPayload(overrides = {}) {
+  return {
+    eventTypeId: 1001,
+    timeZone: "America/Chicago",
+    start: "2026-05-01T00:00:00.000Z",
+    end: "2026-05-02T00:00:00.000Z",
+    slots: {
+      "2026-05-01": [
+        {
+          time: "2026-05-01T15:00:00.000Z",
+          duration: 30,
+        },
+      ],
+    },
+    requestId: "mock-request-id",
+    ...overrides,
+  };
+}
+
 function hasSecretEchoField(value) {
   if (Array.isArray(value)) return value.some((item) => hasSecretEchoField(item));
   if (!value || typeof value !== "object") return false;
@@ -137,6 +156,32 @@ export function createMockApiV2Server() {
           updatedAt: "2026-01-01T00:00:00.000Z",
           requestId: "mock-request-id",
         },
+      });
+      return;
+    }
+
+    if (req.method === "GET" && path === "/v2/slots") {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const eventTypeId = Number(url.searchParams.get("eventTypeId") ?? 0);
+      if (eventTypeId !== 1001) {
+        sendJson(res, 404, {
+          status: "error",
+          error: {
+            code: "NOT_FOUND",
+            message: "Slots not found",
+            requestId: "mock-request-id",
+          },
+        });
+        return;
+      }
+
+      sendJson(res, 200, {
+        status: "success",
+        data: slotsPayload({
+          start: url.searchParams.get("start") ?? "2026-05-01T00:00:00.000Z",
+          end: url.searchParams.get("end") ?? "2026-05-02T00:00:00.000Z",
+          timeZone: url.searchParams.get("timeZone") ?? "America/Chicago",
+        }),
       });
       return;
     }

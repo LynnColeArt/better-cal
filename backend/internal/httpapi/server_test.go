@@ -20,6 +20,7 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer invalid", nil, http.StatusUnauthorized)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "cal_test_valid_mock", nil, http.StatusUnauthorized)
+	assertStatus(t, server.URL, http.MethodGet, "/v2/slots?eventTypeId=1001&start=2026-05-01T00:00:00.000Z&end=2026-05-02T00:00:00.000Z&timeZone=America%2FChicago", "", nil, http.StatusOK)
 
 	platformReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/oauth-clients/mock-platform-client", nil)
 	if err != nil {
@@ -58,6 +59,29 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/cancel", "Bearer cal_test_valid_mock", map[string]any{"cancellationReason": "Fixture cancellation"}, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/reschedule", "Bearer cal_test_valid_mock", map[string]any{"start": "2026-05-02T15:00:00.000Z"}, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings", "Bearer cal_test_unauthorized_mock", createBody, http.StatusForbidden)
+}
+
+func TestSlotsResponseContainsFixtureSlot(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/v2/slots?eventTypeId=1001&start=2026-05-01T00:00:00.000Z&end=2026-05-02T00:00:00.000Z&timeZone=America%2FChicago", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("x-request-id", "slot-request-id")
+
+	resp, body := do(t, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"time":"2026-05-01T15:00:00.000Z"`)) {
+		t.Fatalf("body did not contain fixture slot: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"requestId":"slot-request-id"`)) {
+		t.Fatalf("body did not contain request id: %s", body)
+	}
 }
 
 func TestBookingValidationErrorReturnsBadRequestWithoutEchoingSecret(t *testing.T) {

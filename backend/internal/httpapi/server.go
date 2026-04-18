@@ -12,6 +12,7 @@ import (
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/logging"
+	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
 
 type contextKey string
@@ -23,6 +24,7 @@ type Server struct {
 	authService  *auth.Service
 	authorizer   *authz.Authorizer
 	bookingStore *booking.Store
+	slotService  *slots.Service
 	logger       *slog.Logger
 	mux          *http.ServeMux
 }
@@ -45,6 +47,14 @@ func WithAuthService(service *auth.Service) Option {
 	}
 }
 
+func WithSlotService(service *slots.Service) Option {
+	return func(s *Server) {
+		if service != nil {
+			s.slotService = service
+		}
+	}
+}
+
 func NewServer(cfg config.Config, opts ...Option) http.Handler {
 	return NewServerWithLogger(cfg, slog.Default(), opts...)
 }
@@ -58,6 +68,7 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger, opts ...Option)
 		authService:  auth.NewService(cfg),
 		authorizer:   authz.NewAuthorizer(),
 		bookingStore: booking.NewStore(),
+		slotService:  slots.NewService(),
 		logger:       logger,
 		mux:          http.NewServeMux(),
 	}
@@ -108,6 +119,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.health)
 	s.mux.HandleFunc("GET /v2/me", s.me)
+	s.mux.HandleFunc("GET /v2/slots", s.readSlots)
 	s.mux.HandleFunc("POST /v2/bookings", s.createBooking)
 	s.mux.HandleFunc("GET /v2/bookings/{bookingUid}", s.readBooking)
 	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/cancel", s.cancelBooking)
@@ -168,6 +180,14 @@ func (s *Server) bookings() *booking.Store {
 	}
 	s.bookingStore = booking.NewStore()
 	return s.bookingStore
+}
+
+func (s *Server) slots() *slots.Service {
+	if s.slotService != nil {
+		return s.slotService
+	}
+	s.slotService = slots.NewService()
+	return s.slotService
 }
 
 func (s *Server) requestID(r *http.Request) string {
