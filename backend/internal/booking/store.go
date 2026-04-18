@@ -67,22 +67,42 @@ type Store struct {
 	mu               sync.Mutex
 	repo             Repository
 	bookingValidator BookingValidator
+	sideEffects      SideEffectPort
 	bookings         map[string]Booking
 	idempotency      map[string]string
 }
 
-func NewStore() *Store {
-	return &Store{
-		bookingValidator: DefaultValidator{},
-		bookings:         make(map[string]Booking),
-		idempotency:      make(map[string]string),
+type StoreOption func(*Store)
+
+func WithRepository(repo Repository) StoreOption {
+	return func(s *Store) {
+		s.repo = repo
 	}
 }
 
-func NewStoreWithRepository(repo Repository) *Store {
-	store := NewStore()
-	store.repo = repo
+func WithSideEffectPort(port SideEffectPort) StoreOption {
+	return func(s *Store) {
+		if port != nil {
+			s.sideEffects = port
+		}
+	}
+}
+
+func NewStore(opts ...StoreOption) *Store {
+	store := &Store{
+		bookingValidator: DefaultValidator{},
+		sideEffects:      FixtureSideEffectPort{},
+		bookings:         make(map[string]Booking),
+		idempotency:      make(map[string]string),
+	}
+	for _, opt := range opts {
+		opt(store)
+	}
 	return store
+}
+
+func NewStoreWithRepository(repo Repository) *Store {
+	return NewStore(WithRepository(repo))
 }
 
 func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest) (Booking, bool, error) {
@@ -186,6 +206,13 @@ func (s *Store) Cancel(ctx context.Context, requestID string, uid string, req Ca
 		Status:    "cancelled",
 		UpdatedAt: "2026-01-01T00:05:00.000Z",
 	}))
+	plannedSideEffects, err := s.sideEffectPort().PlanBookingCancelled(ctx, BookingCancelledSideEffect{
+		Booking:            sideEffectSnapshot(cancelled),
+		CancellationReason: req.CancellationReason,
+	})
+	if err != nil {
+		return CancelResult{}, false, err
+	}
 	if s.repo != nil {
 		if err := s.repo.Save(ctx, cancelled); err != nil {
 			return CancelResult{}, false, err
@@ -194,12 +221,8 @@ func (s *Store) Cancel(ctx context.Context, requestID string, uid string, req Ca
 	s.bookings[uid] = cancelled
 
 	return CancelResult{
-		Booking: cancelled,
-		SideEffects: []string{
-			"calendar.cancelled",
-			"email.cancelled",
-			"webhook.booking.cancelled",
-		},
+		Booking:     cancelled,
+		SideEffects: sideEffectNames(plannedSideEffects),
 	}, true, nil
 }
 
@@ -232,6 +255,14 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 		End:       "2026-05-02T15:30:00.000Z",
 		UpdatedAt: "2026-01-01T00:10:00.000Z",
 	}))
+	plannedSideEffects, err := s.sideEffectPort().PlanBookingRescheduled(ctx, BookingRescheduledSideEffect{
+		OldBooking:         sideEffectSnapshot(oldBooking),
+		NewBooking:         sideEffectSnapshot(newBooking),
+		ReschedulingReason: req.ReschedulingReason,
+	})
+	if err != nil {
+		return RescheduleResult{}, false, err
+	}
 
 	if s.repo != nil {
 		if err := s.repo.Save(ctx, oldBooking, newBooking); err != nil {
@@ -242,13 +273,9 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 	s.bookings[newBooking.UID] = newBooking
 
 	return RescheduleResult{
-		OldBooking: oldBooking,
-		NewBooking: newBooking,
-		SideEffects: []string{
-			"calendar.rescheduled",
-			"email.rescheduled",
-			"webhook.booking.rescheduled",
-		},
+		OldBooking:  oldBooking,
+		NewBooking:  newBooking,
+		SideEffects: sideEffectNames(plannedSideEffects),
 	}, true, nil
 }
 
@@ -362,4 +389,11 @@ func (s *Store) validator() BookingValidator {
 		return s.bookingValidator
 	}
 	return DefaultValidator{}
+}
+
+func (s *Store) sideEffectPort() SideEffectPort {
+	if s.sideEffects != nil {
+		return s.sideEffects
+	}
+	return FixtureSideEffectPort{}
 }
