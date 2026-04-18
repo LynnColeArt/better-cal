@@ -27,6 +27,97 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 func (r *PostgresRepository) ReadByUID(ctx context.Context, uid string) (Booking, bool, error) {
+	bookingValue, ok, err := r.readStructuredBooking(ctx, uid)
+	if err != nil {
+		return Booking{}, false, err
+	}
+	if ok {
+		return bookingValue, true, nil
+	}
+	return r.readFixtureBooking(ctx, uid)
+}
+
+func (r *PostgresRepository) ReadByIdempotencyKey(ctx context.Context, key string) (Booking, bool, error) {
+	var uid string
+	err := r.pool.QueryRow(ctx, `
+		select booking_uid
+		from booking_idempotency_keys
+		where idempotency_key = $1
+	`, key).Scan(&uid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Booking{}, false, nil
+	}
+	if err != nil {
+		return Booking{}, false, fmt.Errorf("read idempotency booking uid: %w", err)
+	}
+	return r.ReadByUID(ctx, uid)
+}
+
+func (r *PostgresRepository) readStructuredBooking(ctx context.Context, uid string) (Booking, bool, error) {
+	var bookingValue Booking
+	var responsesRaw []byte
+	var metadataRaw []byte
+	err := r.pool.QueryRow(ctx, `
+		select uid, booking_id, title, status, start_time, end_time, event_type_id, responses, metadata, created_at_wire, updated_at_wire, request_id
+		from bookings
+		where uid = $1
+	`, uid).Scan(
+		&bookingValue.UID,
+		&bookingValue.ID,
+		&bookingValue.Title,
+		&bookingValue.Status,
+		&bookingValue.Start,
+		&bookingValue.End,
+		&bookingValue.EventTypeID,
+		&responsesRaw,
+		&metadataRaw,
+		&bookingValue.CreatedAt,
+		&bookingValue.UpdatedAt,
+		&bookingValue.RequestID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Booking{}, false, nil
+	}
+	if err != nil {
+		return Booking{}, false, fmt.Errorf("read booking row: %w", err)
+	}
+
+	bookingValue.Responses, err = decodeObject(responsesRaw, "booking responses")
+	if err != nil {
+		return Booking{}, false, err
+	}
+	bookingValue.Metadata, err = decodeObject(metadataRaw, "booking metadata")
+	if err != nil {
+		return Booking{}, false, err
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		select attendee_id, name, email, time_zone
+		from booking_attendees
+		where booking_uid = $1
+		order by position
+	`, uid)
+	if err != nil {
+		return Booking{}, false, fmt.Errorf("read booking attendees: %w", err)
+	}
+	defer rows.Close()
+
+	attendees := []Attendee{}
+	for rows.Next() {
+		var attendee Attendee
+		if err := rows.Scan(&attendee.ID, &attendee.Name, &attendee.Email, &attendee.TimeZone); err != nil {
+			return Booking{}, false, fmt.Errorf("scan booking attendee: %w", err)
+		}
+		attendees = append(attendees, attendee)
+	}
+	if err := rows.Err(); err != nil {
+		return Booking{}, false, fmt.Errorf("read booking attendee rows: %w", err)
+	}
+	bookingValue.Attendees = attendees
+	return bookingValue, true, nil
+}
+
+func (r *PostgresRepository) readFixtureBooking(ctx context.Context, uid string) (Booking, bool, error) {
 	var raw []byte
 	err := r.pool.QueryRow(ctx, `select payload from booking_fixtures where uid = $1`, uid).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -34,28 +125,6 @@ func (r *PostgresRepository) ReadByUID(ctx context.Context, uid string) (Booking
 	}
 	if err != nil {
 		return Booking{}, false, fmt.Errorf("read booking fixture: %w", err)
-	}
-
-	bookingValue, err := decodeBooking(raw)
-	if err != nil {
-		return Booking{}, false, err
-	}
-	return bookingValue, true, nil
-}
-
-func (r *PostgresRepository) ReadByIdempotencyKey(ctx context.Context, key string) (Booking, bool, error) {
-	var raw []byte
-	err := r.pool.QueryRow(ctx, `
-		select f.payload
-		from booking_idempotency_keys i
-		join booking_fixtures f on f.uid = i.booking_uid
-		where i.idempotency_key = $1
-	`, key).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Booking{}, false, nil
-	}
-	if err != nil {
-		return Booking{}, false, fmt.Errorf("read idempotency booking fixture: %w", err)
 	}
 
 	bookingValue, err := decodeBooking(raw)
@@ -96,6 +165,69 @@ func (r *PostgresRepository) Save(ctx context.Context, bookings ...Booking) erro
 }
 
 func saveBooking(ctx context.Context, tx db.Tx, booking Booking) error {
+	if err := saveStructuredBooking(ctx, tx, booking); err != nil {
+		return err
+	}
+	return saveFixtureBooking(ctx, tx, booking)
+}
+
+func saveStructuredBooking(ctx context.Context, tx db.Tx, booking Booking) error {
+	responsesRaw, err := json.Marshal(objectOrEmpty(booking.Responses))
+	if err != nil {
+		return fmt.Errorf("encode booking responses: %w", err)
+	}
+	metadataRaw, err := json.Marshal(objectOrEmpty(booking.Metadata))
+	if err != nil {
+		return fmt.Errorf("encode booking metadata: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into bookings (
+			uid,
+			booking_id,
+			title,
+			status,
+			start_time,
+			end_time,
+			event_type_id,
+			responses,
+			metadata,
+			created_at_wire,
+			updated_at_wire,
+			request_id
+		)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		on conflict (uid) do update set
+			booking_id = excluded.booking_id,
+			title = excluded.title,
+			status = excluded.status,
+			start_time = excluded.start_time,
+			end_time = excluded.end_time,
+			event_type_id = excluded.event_type_id,
+			responses = excluded.responses,
+			metadata = excluded.metadata,
+			created_at_wire = excluded.created_at_wire,
+			updated_at_wire = excluded.updated_at_wire,
+			request_id = excluded.request_id,
+			updated_at = now()
+	`, booking.UID, booking.ID, booking.Title, booking.Status, booking.Start, booking.End, booking.EventTypeID, string(responsesRaw), string(metadataRaw), booking.CreatedAt, booking.UpdatedAt, booking.RequestID); err != nil {
+		return fmt.Errorf("save booking row: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `delete from booking_attendees where booking_uid = $1`, booking.UID); err != nil {
+		return fmt.Errorf("delete booking attendees: %w", err)
+	}
+	for position, attendee := range booking.Attendees {
+		if _, err := tx.Exec(ctx, `
+			insert into booking_attendees (booking_uid, position, attendee_id, name, email, time_zone)
+			values ($1, $2, $3, $4, $5, $6)
+		`, booking.UID, position, attendee.ID, attendee.Name, attendee.Email, attendee.TimeZone); err != nil {
+			return fmt.Errorf("save booking attendee: %w", err)
+		}
+	}
+	return nil
+}
+
+func saveFixtureBooking(ctx context.Context, tx db.Tx, booking Booking) error {
 	raw, err := json.Marshal(booking)
 	if err != nil {
 		return fmt.Errorf("encode booking fixture: %w", err)
@@ -110,6 +242,24 @@ func saveBooking(ctx context.Context, tx db.Tx, booking Booking) error {
 		return fmt.Errorf("save booking fixture: %w", err)
 	}
 	return nil
+}
+
+func objectOrEmpty(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func decodeObject(raw []byte, label string) (map[string]any, error) {
+	value := map[string]any{}
+	if len(raw) == 0 {
+		return value, nil
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", label, err)
+	}
+	return value, nil
 }
 
 func decodeBooking(raw []byte) (Booking, error) {

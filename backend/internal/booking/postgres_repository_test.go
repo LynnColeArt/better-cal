@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -22,6 +23,7 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
 		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
 	})
 
@@ -56,6 +58,19 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	assertExplicitBookingRows(t, ctx, pool, uid, "accepted", 1)
+
+	staleFixture := bookingValue
+	staleFixture.Status = "stale-jsonb-status"
+	staleFixture.RequestID = "stale-jsonb-request"
+	rawStaleFixture, err := json.Marshal(staleFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update booking_fixtures set payload = $2 where uid = $1`, uid, string(rawStaleFixture)); err != nil {
+		t.Fatal(err)
+	}
+
 	found, ok, err := repo.ReadByUID(ctx, uid)
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +83,12 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 	}
 	if found.Metadata["fixture"] != "postgres-repository" {
 		t.Fatalf("metadata = %#v", found.Metadata)
+	}
+	if found.Status != "accepted" {
+		t.Fatalf("status = %q", found.Status)
+	}
+	if found.RequestID != "repo-test-request" {
+		t.Fatalf("request id = %q", found.RequestID)
 	}
 
 	replayed, ok, err := repo.ReadByIdempotencyKey(ctx, idempotencyKey)
@@ -85,6 +106,7 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 	if err := repo.Save(ctx, bookingValue); err != nil {
 		t.Fatal(err)
 	}
+	assertExplicitBookingRows(t, ctx, pool, uid, "cancelled", 1)
 	found, ok, err = repo.ReadByUID(ctx, uid)
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +116,71 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 	}
 	if found.Status != "cancelled" {
 		t.Fatalf("status = %q", found.Status)
+	}
+}
+
+func TestPostgresRepositoryFallsBackToFixturePayload(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	uid := fmt.Sprintf("fixture-only-booking-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+	})
+
+	bookingValue := Booking{
+		UID:         uid,
+		ID:          765,
+		Title:       "Fixture Only",
+		Status:      "accepted",
+		Start:       "2026-05-04T15:00:00.000Z",
+		End:         "2026-05-04T15:30:00.000Z",
+		EventTypeID: 1001,
+		Attendees: []Attendee{
+			{
+				ID:       321,
+				Name:     "Fixture Attendee",
+				Email:    "fixture-attendee@example.test",
+				TimeZone: "America/Chicago",
+			},
+		},
+		Responses: map[string]any{
+			"email": "fixture-attendee@example.test",
+		},
+		Metadata: map[string]any{
+			"fixture": "jsonb-fallback",
+		},
+		CreatedAt: "2026-01-01T00:00:00.000Z",
+		UpdatedAt: "2026-01-01T00:00:00.000Z",
+		RequestID: "fixture-fallback-request",
+	}
+	raw, err := json.Marshal(bookingValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		insert into booking_fixtures (uid, payload)
+		values ($1, $2)
+	`, uid, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+
+	found, ok, err := repo.ReadByUID(ctx, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("fixture-only booking was not found")
+	}
+	if found.RequestID != "fixture-fallback-request" {
+		t.Fatalf("request id = %q", found.RequestID)
+	}
+	if found.Metadata["fixture"] != "jsonb-fallback" {
+		t.Fatalf("metadata = %#v", found.Metadata)
 	}
 }
 
@@ -137,4 +224,22 @@ func testPostgresRepositoryPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	return pool
+}
+
+func assertExplicitBookingRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, uid string, expectedStatus string, expectedAttendees int) {
+	t.Helper()
+	var status string
+	if err := pool.QueryRow(ctx, `select status from bookings where uid = $1`, uid).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != expectedStatus {
+		t.Fatalf("explicit booking status = %q, want %q", status, expectedStatus)
+	}
+	var attendees int
+	if err := pool.QueryRow(ctx, `select count(*) from booking_attendees where booking_uid = $1`, uid).Scan(&attendees); err != nil {
+		t.Fatal(err)
+	}
+	if attendees != expectedAttendees {
+		t.Fatalf("attendee row count = %d, want %d", attendees, expectedAttendees)
+	}
 }

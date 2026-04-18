@@ -30,7 +30,7 @@ Run the local API and Postgres stack:
 docker compose up --build
 ```
 
-The API listens on `http://localhost:8080`; Postgres is exposed on `localhost:54320` for local tooling. When `CALDIY_DATABASE_URL` is set, the backend runs embedded migrations and stores the accepted API-key principal, OAuth client metadata, hashed platform client secret, and booking fixture/idempotency canaries in Postgres while preserving the same API response contract.
+The API listens on `http://localhost:8080`; Postgres is exposed on `localhost:54320` for local tooling. When `CALDIY_DATABASE_URL` is set, the backend runs embedded migrations and stores the accepted API-key principal, OAuth client metadata, hashed platform client secret, explicit booking rows, and booking fixture/idempotency canaries in Postgres while preserving the same API response contract.
 
 Run the backend database integration tests against the Compose database:
 
