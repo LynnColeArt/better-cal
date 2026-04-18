@@ -1,6 +1,9 @@
 package booking
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 const (
 	PrimaryFixtureUID     = "mock-booking-personal-basic"
@@ -61,6 +64,7 @@ type RescheduleResult struct {
 
 type Store struct {
 	mu          sync.Mutex
+	repo        Repository
 	bookings    map[string]Booking
 	idempotency map[string]string
 }
@@ -72,7 +76,13 @@ func NewStore() *Store {
 	}
 }
 
-func (s *Store) Create(requestID string, req CreateRequest) (Booking, bool) {
+func NewStoreWithRepository(repo Repository) *Store {
+	store := NewStore()
+	store.repo = repo
+	return store
+}
+
+func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest) (Booking, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -81,7 +91,18 @@ func (s *Store) Create(requestID string, req CreateRequest) (Booking, bool) {
 		if ok {
 			bookingValue, ok := s.bookings[uid]
 			if ok {
-				return bookingValue, true
+				return bookingValue, true, nil
+			}
+		}
+		if s.repo != nil {
+			bookingValue, ok, err := s.repo.ReadByIdempotencyKey(ctx, req.IdempotencyKey)
+			if err != nil {
+				return Booking{}, false, err
+			}
+			if ok {
+				s.bookings[bookingValue.UID] = bookingValue
+				s.idempotency[req.IdempotencyKey] = bookingValue.UID
+				return bookingValue, true, nil
 			}
 		}
 	}
@@ -119,42 +140,48 @@ func (s *Store) Create(requestID string, req CreateRequest) (Booking, bool) {
 		Responses: responses,
 		Metadata:  metadata,
 	})
+	if s.repo != nil {
+		if err := s.repo.SaveCreated(ctx, created, req.IdempotencyKey); err != nil {
+			return Booking{}, false, err
+		}
+	}
+
 	s.bookings[created.UID] = created
 	if req.IdempotencyKey != "" {
 		s.idempotency[req.IdempotencyKey] = created.UID
 	}
 
-	return created, false
+	return created, false, nil
 }
 
-func (s *Store) Read(requestID string, uid string) (Booking, bool) {
+func (s *Store) Read(ctx context.Context, requestID string, uid string) (Booking, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if uid == PrimaryFixtureUID {
-		return s.ensureBooking(requestID), true
-	}
-	bookingValue, ok := s.bookings[uid]
-	return bookingValue, ok
+	return s.findLocked(ctx, requestID, uid)
 }
 
-func (s *Store) Cancel(requestID string, uid string, _ CancelRequest) (CancelResult, bool) {
+func (s *Store) Cancel(ctx context.Context, requestID string, uid string, _ CancelRequest) (CancelResult, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	existing, ok := s.bookings[uid]
-	if uid == PrimaryFixtureUID {
-		existing = s.ensureBooking(requestID)
-		ok = true
+	existing, ok, err := s.findLocked(ctx, requestID, uid)
+	if err != nil {
+		return CancelResult{}, false, err
 	}
 	if !ok {
-		return CancelResult{}, false
+		return CancelResult{}, false, nil
 	}
 
 	cancelled := fixtureBooking(requestID, mergeBooking(existing, Booking{
 		Status:    "cancelled",
 		UpdatedAt: "2026-01-01T00:05:00.000Z",
 	}))
+	if s.repo != nil {
+		if err := s.repo.Save(ctx, cancelled); err != nil {
+			return CancelResult{}, false, err
+		}
+	}
 	s.bookings[uid] = cancelled
 
 	return CancelResult{
@@ -164,20 +191,19 @@ func (s *Store) Cancel(requestID string, uid string, _ CancelRequest) (CancelRes
 			"email.cancelled",
 			"webhook.booking.cancelled",
 		},
-	}, true
+	}, true, nil
 }
 
-func (s *Store) Reschedule(requestID string, oldUID string, req RescheduleRequest) (RescheduleResult, bool) {
+func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string, req RescheduleRequest) (RescheduleResult, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	existing, ok := s.bookings[oldUID]
-	if oldUID == PrimaryFixtureUID {
-		existing = s.ensureBooking(requestID)
-		ok = true
+	existing, ok, err := s.findLocked(ctx, requestID, oldUID)
+	if err != nil {
+		return RescheduleResult{}, false, err
 	}
 	if !ok {
-		return RescheduleResult{}, false
+		return RescheduleResult{}, false, nil
 	}
 
 	oldBooking := fixtureBooking(requestID, mergeBooking(existing, Booking{
@@ -195,6 +221,11 @@ func (s *Store) Reschedule(requestID string, oldUID string, req RescheduleReques
 		UpdatedAt: "2026-01-01T00:10:00.000Z",
 	}))
 
+	if s.repo != nil {
+		if err := s.repo.Save(ctx, oldBooking, newBooking); err != nil {
+			return RescheduleResult{}, false, err
+		}
+	}
 	s.bookings[oldUID] = oldBooking
 	s.bookings[newBooking.UID] = newBooking
 
@@ -206,7 +237,7 @@ func (s *Store) Reschedule(requestID string, oldUID string, req RescheduleReques
 			"email.rescheduled",
 			"webhook.booking.rescheduled",
 		},
-	}, true
+	}, true, nil
 }
 
 func fixtureBooking(requestID string, overrides Booking) Booking {
@@ -283,12 +314,33 @@ func mergeBooking(base Booking, overrides Booking) Booking {
 	return base
 }
 
-func (s *Store) ensureBooking(requestID string) Booking {
-	existing, ok := s.bookings[PrimaryFixtureUID]
+func (s *Store) findLocked(ctx context.Context, requestID string, uid string) (Booking, bool, error) {
+	existing, ok := s.bookings[uid]
 	if ok {
-		return existing
+		return existing, true, nil
 	}
+
+	if s.repo != nil {
+		bookingValue, ok, err := s.repo.ReadByUID(ctx, uid)
+		if err != nil {
+			return Booking{}, false, err
+		}
+		if ok {
+			s.bookings[bookingValue.UID] = bookingValue
+			return bookingValue, true, nil
+		}
+	}
+
+	if uid != PrimaryFixtureUID {
+		return Booking{}, false, nil
+	}
+
 	created := fixtureBooking(requestID, Booking{})
+	if s.repo != nil {
+		if err := s.repo.SaveCreated(ctx, created, ""); err != nil {
+			return Booking{}, false, err
+		}
+	}
 	s.bookings[created.UID] = created
-	return created
+	return created, true, nil
 }

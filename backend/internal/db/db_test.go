@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -29,7 +28,7 @@ func TestPingRequiresPool(t *testing.T) {
 }
 
 func TestWithTxRequiresPool(t *testing.T) {
-	err := WithTx(context.Background(), nil, func(pgx.Tx) error {
+	err := WithTx(context.Background(), nil, func(Tx) error {
 		t.Fatal("transaction callback should not run")
 		return nil
 	})
@@ -45,6 +44,27 @@ func TestOpenPingWithComposePostgres(t *testing.T) {
 
 	if err := Ping(ctx, pool); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	var exists bool
+	if err := pool.QueryRow(ctx, `select exists(select 1 from information_schema.tables where table_name = 'booking_fixtures')`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("booking_fixtures table was not created")
 	}
 }
 
@@ -70,7 +90,7 @@ func TestWithTxCommitsAndRollsBack(t *testing.T) {
 	})
 
 	committedID := prefix + "commit"
-	if err := WithTx(ctx, pool, func(tx pgx.Tx) error {
+	if err := WithTx(ctx, pool, func(tx Tx) error {
 		_, err := tx.Exec(ctx, `insert into better_cal_tx_test (id) values ($1)`, committedID)
 		return err
 	}); err != nil {
@@ -80,7 +100,7 @@ func TestWithTxCommitsAndRollsBack(t *testing.T) {
 
 	rolledBackID := prefix + "rollback"
 	sentinel := errors.New("rollback sentinel")
-	err = WithTx(ctx, pool, func(tx pgx.Tx) error {
+	err = WithTx(ctx, pool, func(tx Tx) error {
 		_, err := tx.Exec(ctx, `insert into better_cal_tx_test (id) values ($1)`, rolledBackID)
 		if err != nil {
 			return err

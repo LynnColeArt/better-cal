@@ -121,11 +121,12 @@ function scanText(file, text, secretNames, literals) {
 
   const keyPattern = [...secretNames].map(escapeRegExp).sort((a, b) => b.length - a.length).join("|");
   const assignmentPattern = new RegExp(
-    `(^|[^A-Za-z0-9_-])["']?(${keyPattern})["']?\\s*[:=]\\s*["']?([^"',\\s}]+)`,
+    `(^|[^A-Za-z0-9_-])["']?(${keyPattern})["']?\\s*[:=]\\s*["']?(?:\\[([^\\]]+)\\]|([^"',\\s}]+))`,
     "gi"
   );
   for (const match of text.matchAll(assignmentPattern)) {
-    if (!isAllowedRedaction(match[3])) {
+    const value = match[3] ?? match[4];
+    if (!isAllowedRedaction(value)) {
       problems.push(`${rel(file)}: secret-like assignment ${match[2]} is not redacted`);
     }
   }

@@ -27,11 +27,21 @@ type Server struct {
 	mux          *http.ServeMux
 }
 
-func NewServer(cfg config.Config) http.Handler {
-	return NewServerWithLogger(cfg, slog.Default())
+type Option func(*Server)
+
+func WithBookingStore(store *booking.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.bookingStore = store
+		}
+	}
 }
 
-func NewServerWithLogger(cfg config.Config, logger *slog.Logger) http.Handler {
+func NewServer(cfg config.Config, opts ...Option) http.Handler {
+	return NewServerWithLogger(cfg, slog.Default(), opts...)
+}
+
+func NewServerWithLogger(cfg config.Config, logger *slog.Logger, opts ...Option) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -42,6 +52,9 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger) http.Handler {
 		bookingStore: booking.NewStore(),
 		logger:       logger,
 		mux:          http.NewServeMux(),
+	}
+	for _, opt := range opts {
+		opt(server)
 	}
 	server.routes()
 	return server

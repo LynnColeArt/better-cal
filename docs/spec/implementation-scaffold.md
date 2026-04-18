@@ -124,12 +124,12 @@ Adapters should not:
 3. Data contract registries for public schemas, enums, identifiers, stored JSON, and secret classification. Started in `contracts/registries/`.
 4. API v2 auth route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with credential verification factored into `backend/internal/auth/`.
 5. Booking lifecycle canary route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with fixture state and transitions factored into `backend/internal/booking/`.
-6. Database connection and transaction helpers. Started in `backend/internal/db/` with Postgres pool, ping, and transaction tests against the Compose database.
+6. Database connection and transaction helpers. Started in `backend/internal/db/` with Postgres pool, ping, embedded migrations, and transaction tests against the Compose database.
 7. Principal resolver and policy package. Principal fixture resolution has started in `backend/internal/auth/`; named, deny-by-default policy enforcement has started in `backend/internal/authz/`. Durable identity lookup and resource-scoped policy checks are next.
-8. One low-risk persisted read route.
+8. One low-risk persisted read/write route. Started with the booking fixture canary and idempotency key repository in `backend/internal/booking/`.
 9. Next.js tRPC bridge proof of concept for one query and one mutation.
 10. Slot read fixture replay.
-11. Booking validation service with durable state and side-effect ports. Fixture lifecycle behavior has started in `backend/internal/booking/`; persistence and provider ports are next.
+11. Booking validation service with durable state and side-effect ports. Fixture lifecycle behavior and the first persistence canary have started in `backend/internal/booking/`; provider ports are next.
 
 ## Testing Layers
 

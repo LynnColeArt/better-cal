@@ -1,10 +1,13 @@
 package booking
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestCreateBookingAppliesDefaultsAndIdempotency(t *testing.T) {
 	store := NewStore()
-	created, duplicate := store.Create("first-request", CreateRequest{
+	created, duplicate, err := store.Create(context.Background(), "first-request", CreateRequest{
 		Start: "2026-05-01T15:00:00.000Z",
 		Attendee: Attendee{
 			Name:     "Fixture Attendee",
@@ -13,6 +16,9 @@ func TestCreateBookingAppliesDefaultsAndIdempotency(t *testing.T) {
 		},
 		IdempotencyKey: "fixture-booking-personal-basic",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if duplicate {
 		t.Fatal("first create was reported as duplicate")
 	}
@@ -23,9 +29,12 @@ func TestCreateBookingAppliesDefaultsAndIdempotency(t *testing.T) {
 		t.Fatalf("attendee id = %d", created.Attendees[0].ID)
 	}
 
-	replayed, duplicate := store.Create("second-request", CreateRequest{
+	replayed, duplicate, err := store.Create(context.Background(), "second-request", CreateRequest{
 		IdempotencyKey: "fixture-booking-personal-basic",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !duplicate {
 		t.Fatal("second create was not reported as duplicate")
 	}
@@ -34,10 +43,40 @@ func TestCreateBookingAppliesDefaultsAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestCreateReplaysRepositoryIdempotency(t *testing.T) {
+	repositoryBooking := fixtureBooking("repo-request", Booking{
+		UID: "repo-booking",
+	})
+	store := NewStoreWithRepository(&fakeRepository{
+		byIdempotency: map[string]Booking{
+			"repo-key": repositoryBooking,
+		},
+	})
+
+	replayed, duplicate, err := store.Create(context.Background(), "second-request", CreateRequest{
+		IdempotencyKey: "repo-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !duplicate {
+		t.Fatal("repository idempotency replay was not reported as duplicate")
+	}
+	if replayed.UID != "repo-booking" {
+		t.Fatalf("uid = %q", replayed.UID)
+	}
+	if replayed.RequestID != "repo-request" {
+		t.Fatalf("request id = %q", replayed.RequestID)
+	}
+}
+
 func TestReadEnsuresPrimaryFixtureBooking(t *testing.T) {
 	store := NewStore()
 
-	found, ok := store.Read("read-request", PrimaryFixtureUID)
+	found, ok, err := store.Read(context.Background(), "read-request", PrimaryFixtureUID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("primary fixture booking was not found")
 	}
@@ -45,17 +84,44 @@ func TestReadEnsuresPrimaryFixtureBooking(t *testing.T) {
 		t.Fatalf("request id = %q", found.RequestID)
 	}
 
-	if _, ok := store.Read("read-request", "missing"); ok {
+	if _, ok, err := store.Read(context.Background(), "read-request", "missing"); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatal("missing booking was found")
+	}
+}
+
+func TestReadLoadsRepositoryBooking(t *testing.T) {
+	repositoryBooking := fixtureBooking("repo-read-request", Booking{
+		UID: "repo-read-booking",
+	})
+	store := NewStoreWithRepository(&fakeRepository{
+		byUID: map[string]Booking{
+			"repo-read-booking": repositoryBooking,
+		},
+	})
+
+	found, ok, err := store.Read(context.Background(), "request-id", "repo-read-booking")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("repository booking was not found")
+	}
+	if found.RequestID != "repo-read-request" {
+		t.Fatalf("request id = %q", found.RequestID)
 	}
 }
 
 func TestCancelBookingUpdatesState(t *testing.T) {
 	store := NewStore()
 
-	result, ok := store.Cancel("cancel-request", PrimaryFixtureUID, CancelRequest{
+	result, ok, err := store.Cancel(context.Background(), "cancel-request", PrimaryFixtureUID, CancelRequest{
 		CancellationReason: "Fixture cancellation",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("booking was not cancelled")
 	}
@@ -66,7 +132,10 @@ func TestCancelBookingUpdatesState(t *testing.T) {
 		t.Fatalf("side effects = %v", result.SideEffects)
 	}
 
-	found, ok := store.Read("read-request", PrimaryFixtureUID)
+	found, ok, err := store.Read(context.Background(), "read-request", PrimaryFixtureUID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("cancelled booking was not found")
 	}
@@ -78,9 +147,12 @@ func TestCancelBookingUpdatesState(t *testing.T) {
 func TestRescheduleBookingCreatesOldAndNewBookings(t *testing.T) {
 	store := NewStore()
 
-	result, ok := store.Reschedule("reschedule-request", PrimaryFixtureUID, RescheduleRequest{
+	result, ok, err := store.Reschedule(context.Background(), "reschedule-request", PrimaryFixtureUID, RescheduleRequest{
 		Start: "2026-05-02T15:00:00.000Z",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("booking was not rescheduled")
 	}
@@ -94,7 +166,10 @@ func TestRescheduleBookingCreatesOldAndNewBookings(t *testing.T) {
 		t.Fatalf("new start = %q", result.NewBooking.Start)
 	}
 
-	found, ok := store.Read("read-request", RescheduledFixtureUID)
+	found, ok, err := store.Read(context.Background(), "read-request", RescheduledFixtureUID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("rescheduled booking was not found")
 	}
@@ -106,10 +181,54 @@ func TestRescheduleBookingCreatesOldAndNewBookings(t *testing.T) {
 func TestLifecycleMethodsReturnFalseForMissingBookings(t *testing.T) {
 	store := NewStore()
 
-	if _, ok := store.Cancel("request-id", "missing", CancelRequest{}); ok {
+	if _, ok, err := store.Cancel(context.Background(), "request-id", "missing", CancelRequest{}); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatal("missing booking was cancelled")
 	}
-	if _, ok := store.Reschedule("request-id", "missing", RescheduleRequest{}); ok {
+	if _, ok, err := store.Reschedule(context.Background(), "request-id", "missing", RescheduleRequest{}); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatal("missing booking was rescheduled")
 	}
+}
+
+type fakeRepository struct {
+	byUID         map[string]Booking
+	byIdempotency map[string]Booking
+}
+
+func (f *fakeRepository) ReadByUID(_ context.Context, uid string) (Booking, bool, error) {
+	bookingValue, ok := f.byUID[uid]
+	return bookingValue, ok, nil
+}
+
+func (f *fakeRepository) ReadByIdempotencyKey(_ context.Context, key string) (Booking, bool, error) {
+	bookingValue, ok := f.byIdempotency[key]
+	return bookingValue, ok, nil
+}
+
+func (f *fakeRepository) SaveCreated(_ context.Context, bookingValue Booking, idempotencyKey string) error {
+	if f.byUID == nil {
+		f.byUID = make(map[string]Booking)
+	}
+	f.byUID[bookingValue.UID] = bookingValue
+	if idempotencyKey == "" {
+		return nil
+	}
+	if f.byIdempotency == nil {
+		f.byIdempotency = make(map[string]Booking)
+	}
+	f.byIdempotency[idempotencyKey] = bookingValue
+	return nil
+}
+
+func (f *fakeRepository) Save(_ context.Context, bookings ...Booking) error {
+	if f.byUID == nil {
+		f.byUID = make(map[string]Booking)
+	}
+	for _, bookingValue := range bookings {
+		f.byUID[bookingValue.UID] = bookingValue
+	}
+	return nil
 }

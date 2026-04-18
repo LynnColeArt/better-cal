@@ -56,7 +56,11 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, duplicate := s.bookings().Create(s.requestID(r), body)
+	created, duplicate, err := s.bookings().Create(r.Context(), s.requestID(r), body)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	status := http.StatusCreated
 	if duplicate {
 		status = http.StatusOK
@@ -76,7 +80,11 @@ func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uid := r.PathValue("bookingUid")
-	found, ok := s.bookings().Read(s.requestID(r), uid)
+	found, ok, err := s.bookings().Read(r.Context(), s.requestID(r), uid)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "Booking not found", true)
 		return
@@ -103,7 +111,11 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uid := r.PathValue("bookingUid")
-	result, ok := s.bookings().Cancel(s.requestID(r), uid, body)
+	result, ok, err := s.bookings().Cancel(r.Context(), s.requestID(r), uid, body)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
 		return
@@ -134,7 +146,11 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oldUID := r.PathValue("bookingUid")
-	result, ok := s.bookings().Reschedule(s.requestID(r), oldUID, body)
+	result, ok, err := s.bookings().Reschedule(r.Context(), s.requestID(r), oldUID, body)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
 		return

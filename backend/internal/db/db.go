@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -13,6 +14,11 @@ var (
 	ErrMissingDatabaseURL = errors.New("missing database url")
 	ErrNilPool            = errors.New("nil database pool")
 )
+
+type Tx interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if databaseURL == "" {
@@ -41,7 +47,7 @@ func Ping(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
+func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(Tx) error) error {
 	if pool == nil {
 		return ErrNilPool
 	}

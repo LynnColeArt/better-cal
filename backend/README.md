@@ -13,7 +13,7 @@ The first implementation slice is deliberately small and fixture-driven. It supp
 - `POST /v2/bookings/{bookingUid}/cancel`
 - `POST /v2/bookings/{bookingUid}/reschedule`
 
-The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, and an in-memory booking service for the current accepted lifecycle fixtures.
+The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, and a booking service for the current accepted lifecycle fixtures. When `CALDIY_DATABASE_URL` is set, booking fixture state and idempotency keys are stored in Postgres through the repository adapter; otherwise the service falls back to in-memory fixture state.
 
 Run locally:
 
@@ -38,7 +38,7 @@ go test ./...
 Run the Postgres-backed database integration tests against the Compose database:
 
 ```bash
-CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" go test ./internal/db
+CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" go test ./internal/db ./internal/booking
 ```
 
 Run contract replay smoke from the repository root:
@@ -47,4 +47,4 @@ Run contract replay smoke from the repository root:
 node tools/backend-smoke/smoke-test.mjs
 ```
 
-When `CALDIY_DATABASE_URL` is set, the API opens and pings Postgres at startup. The current booking lifecycle still uses in-memory fixture data only. Persistence, provider integrations, and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.
+When `CALDIY_DATABASE_URL` is set, the API opens Postgres, runs embedded migrations, and stores the booking fixture canary in `booking_fixtures` with duplicate create detection in `booking_idempotency_keys`. Provider integrations and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.
