@@ -19,7 +19,7 @@ func TestPostgresRepositoryPersistsAPIKeyPrincipal(t *testing.T) {
 
 	repo := NewPostgresRepository(pool)
 	token := fmt.Sprintf("principal-token-%d", time.Now().UnixNano())
-	tokenHash := apiKeyTokenHash(token)
+	tokenHash := sha256Hex(token)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -153,6 +153,103 @@ func TestPostgresRepositoryRejectsEmptyOAuthClientID(t *testing.T) {
 	repo := NewPostgresRepository(pool)
 	if err := repo.SaveOAuthClient(ctx, FixtureOAuthClient("")); !errors.Is(err, ErrEmptyOAuthClientID) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPostgresRepositoryPersistsPlatformClientWithHashedSecret(t *testing.T) {
+	pool := testPostgresPrincipalPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	clientID := fmt.Sprintf("platform-client-%d", time.Now().UnixNano())
+	secret := fmt.Sprintf("platform-secret-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from platform_clients where client_id = $1`, clientID)
+	})
+
+	client := FixturePlatformClient(clientID)
+	client.Permissions = []string{"booking:read"}
+	client.PolicyPermissions = []string{"platform-client:read"}
+	if err := repo.SavePlatformClient(ctx, secret, client); err != nil {
+		t.Fatal(err)
+	}
+
+	var rawSecretRows int
+	var hashLength int
+	var storedHash string
+	if err := pool.QueryRow(ctx, `
+		select
+			count(*) filter (where to_jsonb(platform_clients)::text like '%' || $2 || '%'),
+			length(secret_sha256),
+			secret_sha256
+		from platform_clients
+		where client_id = $1
+		group by secret_sha256
+	`, clientID, secret).Scan(&rawSecretRows, &hashLength, &storedHash); err != nil {
+		t.Fatal(err)
+	}
+	if rawSecretRows != 0 {
+		t.Fatal("raw platform client secret was stored in platform client row")
+	}
+	if hashLength != 64 {
+		t.Fatalf("hash length = %d", hashLength)
+	}
+	if storedHash != sha256Hex(secret) {
+		t.Fatal("stored platform client secret hash did not match expected digest")
+	}
+
+	record, ok, err := repo.ReadPlatformClient(ctx, clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("platform client was not found")
+	}
+	if record.Client.ID != clientID {
+		t.Fatalf("client id = %q", record.Client.ID)
+	}
+	if record.Client.OrganizationID != 456 {
+		t.Fatalf("organization id = %d", record.Client.OrganizationID)
+	}
+	if len(record.Client.Permissions) != 1 || record.Client.Permissions[0] != "booking:read" {
+		t.Fatalf("permissions = %#v", record.Client.Permissions)
+	}
+	if !matchesSHA256Hex(secret, record.SecretSHA256) {
+		t.Fatal("stored platform secret hash did not verify")
+	}
+
+	service := NewService(testConfig(), WithPlatformClientRepository(repo))
+	verified, ok, err := service.VerifyPlatformClientContext(ctx, clientID, clientID, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("platform client did not verify through repository")
+	}
+	if verified.ID != clientID {
+		t.Fatalf("verified client id = %q", verified.ID)
+	}
+	if _, ok, err := service.VerifyPlatformClientContext(ctx, clientID, clientID, secret+"-wrong"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("wrong platform client secret unexpectedly verified")
+	}
+}
+
+func TestPostgresRepositoryRejectsEmptyPlatformClientSeedInputs(t *testing.T) {
+	pool := testPostgresPrincipalPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	if err := repo.SavePlatformClient(ctx, "secret", FixturePlatformClient("")); !errors.Is(err, ErrEmptyPlatformClientID) {
+		t.Fatalf("empty client id err = %v", err)
+	}
+	if err := repo.SavePlatformClient(ctx, "", FixturePlatformClient("platform-client")); !errors.Is(err, ErrEmptyPlatformClientSecret) {
+		t.Fatalf("empty secret err = %v", err)
 	}
 }
 

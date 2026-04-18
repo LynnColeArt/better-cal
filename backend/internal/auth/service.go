@@ -52,6 +52,7 @@ type Service struct {
 	platformClientSecret string
 	apiKeyPrincipals     APIKeyPrincipalRepository
 	oauthClients         OAuthClientRepository
+	platformClients      PlatformClientRepository
 }
 
 type ServiceOption func(*Service)
@@ -65,6 +66,12 @@ func WithAPIKeyPrincipalRepository(repo APIKeyPrincipalRepository) ServiceOption
 func WithOAuthClientRepository(repo OAuthClientRepository) ServiceOption {
 	return func(s *Service) {
 		s.oauthClients = repo
+	}
+}
+
+func WithPlatformClientRepository(repo PlatformClientRepository) ServiceOption {
+	return func(s *Service) {
+		s.platformClients = repo
 	}
 }
 
@@ -151,21 +158,47 @@ func FixtureOAuthClient(clientID string) OAuthClient {
 }
 
 func (s *Service) VerifyPlatformClient(pathClientID string, headerClientID string, secret string) (PlatformClient, bool) {
-	if pathClientID != s.platformClientID ||
-		headerClientID != s.platformClientID ||
-		!secureEqual(secret, s.platformClientSecret) {
-		return PlatformClient{}, false
+	client, ok, _ := s.VerifyPlatformClientContext(context.Background(), pathClientID, headerClientID, secret)
+	return client, ok
+}
+
+func (s *Service) VerifyPlatformClientContext(ctx context.Context, pathClientID string, headerClientID string, secret string) (PlatformClient, bool, error) {
+	if pathClientID == "" || pathClientID != headerClientID {
+		return PlatformClient{}, false, nil
 	}
 
+	if s.platformClients != nil {
+		record, ok, err := s.platformClients.ReadPlatformClient(ctx, pathClientID)
+		if err != nil {
+			return PlatformClient{}, false, err
+		}
+		if !ok {
+			_ = matchesSHA256Hex(secret, zeroSHA256Hash)
+			return PlatformClient{}, false, nil
+		}
+		if !matchesSHA256Hex(secret, record.SecretSHA256) {
+			return PlatformClient{}, false, nil
+		}
+		return record.Client, true, nil
+	}
+
+	if pathClientID != s.platformClientID || !secureEqual(secret, s.platformClientSecret) {
+		return PlatformClient{}, false, nil
+	}
+
+	return FixturePlatformClient(s.platformClientID), true, nil
+}
+
+func FixturePlatformClient(clientID string) PlatformClient {
 	return PlatformClient{
-		ID:                s.platformClientID,
+		ID:                clientID,
 		Name:              "Fixture Platform Client",
 		OrganizationID:    456,
 		Permissions:       []string{"booking:read", "booking:write"},
 		PolicyPermissions: []string{"platform-client:read"},
 		CreatedAt:         "2026-01-01T00:00:00.000Z",
 		UpdatedAt:         "2026-01-01T00:00:00.000Z",
-	}, true
+	}
 }
 
 func bearerToken(authorization string) string {
@@ -182,4 +215,31 @@ func secureEqual(left string, right string) bool {
 	leftHash := sha256.Sum256([]byte(left))
 	rightHash := sha256.Sum256([]byte(right))
 	return subtle.ConstantTimeCompare(leftHash[:], rightHash[:]) == 1
+}
+
+const zeroSHA256Hash = "0000000000000000000000000000000000000000000000000000000000000000"
+
+func matchesSHA256Hex(value string, expectedHash string) bool {
+	actualHash := sha256Hex(value)
+	validHash := isSHA256Hex(expectedHash)
+	if !validHash {
+		expectedHash = zeroSHA256Hash
+	}
+	matches := subtle.ConstantTimeCompare([]byte(actualHash), []byte(expectedHash)) == 1
+	return value != "" && validHash && matches
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		switch {
+		case char >= '0' && char <= '9':
+		case char >= 'a' && char <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
 }

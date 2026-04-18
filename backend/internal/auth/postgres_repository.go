@@ -16,6 +16,8 @@ const wireTimeLayout = "2006-01-02T15:04:05.000Z"
 
 var ErrEmptyAPIKey = errors.New("empty api key")
 var ErrEmptyOAuthClientID = errors.New("empty oauth client id")
+var ErrEmptyPlatformClientID = errors.New("empty platform client id")
+var ErrEmptyPlatformClientSecret = errors.New("empty platform client secret")
 
 type APIKeyPrincipalRepository interface {
 	ReadAPIKeyPrincipal(ctx context.Context, token string) (Principal, bool, error)
@@ -23,6 +25,15 @@ type APIKeyPrincipalRepository interface {
 
 type OAuthClientRepository interface {
 	ReadOAuthClient(ctx context.Context, clientID string) (OAuthClient, bool, error)
+}
+
+type PlatformClientRecord struct {
+	Client       PlatformClient
+	SecretSHA256 string
+}
+
+type PlatformClientRepository interface {
+	ReadPlatformClient(ctx context.Context, clientID string) (PlatformClientRecord, bool, error)
 }
 
 type PostgresRepository struct {
@@ -45,7 +56,7 @@ func (r *PostgresRepository) ReadAPIKeyPrincipal(ctx context.Context, token stri
 		select user_id, user_uuid, principal_type, username, email, permissions, principal_created_at, principal_updated_at
 		from api_key_principals
 		where token_sha256 = $1
-	`, apiKeyTokenHash(token)).Scan(
+	`, sha256Hex(token)).Scan(
 		&principal.ID,
 		&principal.UUID,
 		&principal.Type,
@@ -108,7 +119,7 @@ func (r *PostgresRepository) SaveAPIKeyPrincipal(ctx context.Context, token stri
 			principal_created_at = excluded.principal_created_at,
 			principal_updated_at = excluded.principal_updated_at,
 			updated_at = now()
-	`, apiKeyTokenHash(token), principal.ID, principal.UUID, principal.Type, principal.Username, principal.Email, permissions, createdAt, updatedAt); err != nil {
+	`, sha256Hex(token), principal.ID, principal.UUID, principal.Type, principal.Username, principal.Email, permissions, createdAt, updatedAt); err != nil {
 		return fmt.Errorf("save api key principal: %w", err)
 	}
 	return nil
@@ -184,8 +195,94 @@ func (r *PostgresRepository) SaveOAuthClient(ctx context.Context, client OAuthCl
 	return nil
 }
 
-func apiKeyTokenHash(token string) string {
-	sum := sha256.Sum256([]byte(token))
+func (r *PostgresRepository) ReadPlatformClient(ctx context.Context, clientID string) (PlatformClientRecord, bool, error) {
+	if clientID == "" {
+		return PlatformClientRecord{}, false, nil
+	}
+
+	var record PlatformClientRecord
+	var createdAt time.Time
+	var updatedAt time.Time
+	err := r.pool.QueryRow(ctx, `
+		select client_id, name, organization_id, permissions, policy_permissions, client_created_at, client_updated_at, secret_sha256
+		from platform_clients
+		where client_id = $1
+	`, clientID).Scan(
+		&record.Client.ID,
+		&record.Client.Name,
+		&record.Client.OrganizationID,
+		&record.Client.Permissions,
+		&record.Client.PolicyPermissions,
+		&createdAt,
+		&updatedAt,
+		&record.SecretSHA256,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PlatformClientRecord{}, false, nil
+	}
+	if err != nil {
+		return PlatformClientRecord{}, false, fmt.Errorf("read platform client: %w", err)
+	}
+
+	record.Client.CreatedAt = formatWireTime(createdAt)
+	record.Client.UpdatedAt = formatWireTime(updatedAt)
+	return record, true, nil
+}
+
+func (r *PostgresRepository) SavePlatformClient(ctx context.Context, secret string, client PlatformClient) error {
+	if client.ID == "" {
+		return ErrEmptyPlatformClientID
+	}
+	if secret == "" {
+		return ErrEmptyPlatformClientSecret
+	}
+
+	createdAt, err := parseWireTime(client.CreatedAt)
+	if err != nil {
+		return err
+	}
+	updatedAt, err := parseWireTime(client.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	permissions := client.Permissions
+	if permissions == nil {
+		permissions = []string{}
+	}
+	policyPermissions := client.PolicyPermissions
+	if policyPermissions == nil {
+		policyPermissions = []string{}
+	}
+
+	if _, err := r.pool.Exec(ctx, `
+		insert into platform_clients (
+			client_id,
+			secret_sha256,
+			name,
+			organization_id,
+			permissions,
+			policy_permissions,
+			client_created_at,
+			client_updated_at
+		)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)
+		on conflict (client_id) do update set
+			secret_sha256 = excluded.secret_sha256,
+			name = excluded.name,
+			organization_id = excluded.organization_id,
+			permissions = excluded.permissions,
+			policy_permissions = excluded.policy_permissions,
+			client_created_at = excluded.client_created_at,
+			client_updated_at = excluded.client_updated_at,
+			updated_at = now()
+	`, client.ID, sha256Hex(secret), client.Name, client.OrganizationID, permissions, policyPermissions, createdAt, updatedAt); err != nil {
+		return fmt.Errorf("save platform client: %w", err)
+	}
+	return nil
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
 

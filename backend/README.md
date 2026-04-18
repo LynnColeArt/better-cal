@@ -13,7 +13,7 @@ The first implementation slice is deliberately small and fixture-driven. It supp
 - `POST /v2/bookings/{bookingUid}/cancel`
 - `POST /v2/bookings/{bookingUid}/reschedule`
 
-The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, and a booking service for the current accepted lifecycle fixtures. When `CALDIY_DATABASE_URL` is set, API-key principal lookup, OAuth client metadata lookup, booking fixture state, and idempotency keys are stored in Postgres through repository adapters; otherwise the service falls back to config and in-memory fixture state.
+The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, and a booking service for the current accepted lifecycle fixtures. When `CALDIY_DATABASE_URL` is set, API-key principal lookup, OAuth client metadata lookup, platform client verification, booking fixture state, and idempotency keys are stored in Postgres through repository adapters; otherwise the service falls back to config and in-memory fixture state.
 
 Run locally:
 
@@ -47,4 +47,4 @@ Run contract replay smoke from the repository root:
 node tools/backend-smoke/smoke-test.mjs
 ```
 
-When `CALDIY_DATABASE_URL` is set, the API opens Postgres, runs embedded migrations, seeds the fixture API-key principal in `api_key_principals` using a SHA-256 token hash, seeds non-secret OAuth client metadata in `oauth_clients`, and stores the booking fixture canary in `booking_fixtures` with duplicate create detection in `booking_idempotency_keys`. Provider integrations and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.
+When `CALDIY_DATABASE_URL` is set, the API opens Postgres, runs embedded migrations, seeds the fixture API-key principal in `api_key_principals` using a SHA-256 token hash, seeds non-secret OAuth client metadata in `oauth_clients`, stores only a SHA-256 hash for platform client secret verification in `platform_clients`, and stores the booking fixture canary in `booking_fixtures` with duplicate create detection in `booking_idempotency_keys`. Provider integrations and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.

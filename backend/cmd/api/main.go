@@ -48,11 +48,17 @@ func main() {
 			slog.Error("oauth client seed failed", "error", err)
 			os.Exit(1)
 		}
+		if err := authRepository.SavePlatformClient(ctx, cfg.PlatformClientSecret, auth.FixturePlatformClient(cfg.PlatformClientID)); err != nil {
+			cancel()
+			slog.Error("platform client seed failed", "error", err)
+			os.Exit(1)
+		}
 		serverOptions = append(serverOptions, httpapi.WithAuthService(
 			auth.NewService(
 				cfg,
 				auth.WithAPIKeyPrincipalRepository(authRepository),
 				auth.WithOAuthClientRepository(authRepository),
+				auth.WithPlatformClientRepository(authRepository),
 			),
 		))
 		serverOptions = append(serverOptions, httpapi.WithBookingStore(

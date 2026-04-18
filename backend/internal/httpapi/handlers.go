@@ -229,11 +229,16 @@ func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) platformClient(w http.ResponseWriter, r *http.Request) {
 	clientID := r.PathValue("clientId")
-	client, ok := s.authenticator().VerifyPlatformClient(
+	client, ok, err := s.authenticator().VerifyPlatformClientContext(
+		r.Context(),
 		clientID,
 		r.Header.Get("x-cal-client-id"),
 		r.Header.Get("x-cal-secret-key"),
 	)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid platform client credentials", true)
 		return

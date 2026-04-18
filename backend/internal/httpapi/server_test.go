@@ -106,6 +106,24 @@ func TestOAuthClientRepositoryErrorReturnsInternalError(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/auth/oauth2/clients/mock-oauth-client", "Bearer cal_test_valid_mock", nil, http.StatusInternalServerError)
 }
 
+func TestPlatformClientRepositoryErrorReturnsInternalError(t *testing.T) {
+	service := auth.NewService(testConfig(), auth.WithPlatformClientRepository(erroringPlatformClients{}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/v2/oauth-clients/mock-platform-client", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("x-cal-client-id", "mock-platform-client")
+	req.Header.Set("x-cal-secret-key", "mock-platform-secret")
+	resp, body := do(t, req)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+}
+
 func assertStatus(t *testing.T, baseURL string, method string, path string, authorization string, body any, expected int) {
 	t.Helper()
 	var requestBody *bytes.Reader
@@ -164,4 +182,10 @@ type erroringOAuthClients struct{}
 
 func (erroringOAuthClients) ReadOAuthClient(context.Context, string) (auth.OAuthClient, bool, error) {
 	return auth.OAuthClient{}, false, errors.New("oauth repository unavailable")
+}
+
+type erroringPlatformClients struct{}
+
+func (erroringPlatformClients) ReadPlatformClient(context.Context, string) (auth.PlatformClientRecord, bool, error) {
+	return auth.PlatformClientRecord{}, false, errors.New("platform repository unavailable")
 }

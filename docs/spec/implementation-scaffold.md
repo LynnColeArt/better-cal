@@ -125,7 +125,7 @@ Adapters should not:
 4. API v2 auth route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with credential verification factored into `backend/internal/auth/`.
 5. Booking lifecycle canary route compatibility for the starter fixture set. Started in `backend/internal/httpapi/` with fixture state and transitions factored into `backend/internal/booking/`.
 6. Database connection and transaction helpers. Started in `backend/internal/db/` with Postgres pool, ping, embedded migrations, and transaction tests against the Compose database.
-7. Principal resolver and policy package. Principal fixture resolution has started in `backend/internal/auth/`; API-key principal lookup now has a hashed-token Postgres canary, OAuth client metadata lookup has a non-secret Postgres canary, and named, deny-by-default policy enforcement has started in `backend/internal/authz/`. Resource-scoped policy checks are next.
+7. Principal resolver and policy package. Principal fixture resolution has started in `backend/internal/auth/`; API-key principal lookup now has a hashed-token Postgres canary, OAuth client metadata lookup has a non-secret Postgres canary, platform client verification has a hashed-secret Postgres canary, and named, deny-by-default policy enforcement has started in `backend/internal/authz/`. Resource-scoped policy checks are next.
 8. One low-risk persisted read/write route. Started with the booking fixture canary and idempotency key repository in `backend/internal/booking/`.
 9. Next.js tRPC bridge proof of concept for one query and one mutation.
 10. Slot read fixture replay.

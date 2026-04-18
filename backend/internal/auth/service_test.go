@@ -168,6 +168,70 @@ func TestVerifyPlatformClientRejectsEmptyConfiguredSecret(t *testing.T) {
 	}
 }
 
+func TestVerifyPlatformClientUsesRepositoryWhenConfigured(t *testing.T) {
+	service := NewService(testConfig(), WithPlatformClientRepository(&fakePlatformClientRepository{
+		byID: map[string]PlatformClientRecord{
+			"db-platform-client": {
+				Client:       FixturePlatformClient("db-platform-client"),
+				SecretSHA256: sha256Hex("db-platform-secret"),
+			},
+		},
+	}))
+
+	client, ok, err := service.VerifyPlatformClientContext(
+		context.Background(),
+		"db-platform-client",
+		"db-platform-client",
+		"db-platform-secret",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected repository platform client")
+	}
+	if client.ID != "db-platform-client" {
+		t.Fatalf("client id = %q", client.ID)
+	}
+
+	cases := []struct {
+		name           string
+		pathClientID   string
+		headerClientID string
+		secret         string
+	}{
+		{name: "config client not used", pathClientID: "mock-platform-client", headerClientID: "mock-platform-client", secret: "mock-platform-secret"},
+		{name: "wrong header client", pathClientID: "db-platform-client", headerClientID: "wrong", secret: "db-platform-secret"},
+		{name: "wrong secret", pathClientID: "db-platform-client", headerClientID: "db-platform-client", secret: "wrong"},
+		{name: "empty secret", pathClientID: "db-platform-client", headerClientID: "db-platform-client", secret: ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, ok, err := service.VerifyPlatformClientContext(context.Background(), testCase.pathClientID, testCase.headerClientID, testCase.secret); err != nil {
+				t.Fatal(err)
+			} else if ok {
+				t.Fatal("credentials unexpectedly authenticated")
+			}
+		})
+	}
+}
+
+func TestVerifyPlatformClientReturnsRepositoryErrors(t *testing.T) {
+	sentinel := errors.New("platform repository unavailable")
+	service := NewService(testConfig(), WithPlatformClientRepository(&fakePlatformClientRepository{
+		err: sentinel,
+	}))
+
+	if _, _, err := service.VerifyPlatformClientContext(
+		context.Background(),
+		"db-platform-client",
+		"db-platform-client",
+		"db-platform-secret",
+	); !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func testConfig() config.Config {
 	return config.Config{
 		APIKey:               "cal_test_valid_mock",
@@ -201,4 +265,17 @@ func (r *fakeOAuthClientRepository) ReadOAuthClient(_ context.Context, clientID 
 	}
 	client, ok := r.byID[clientID]
 	return client, ok, nil
+}
+
+type fakePlatformClientRepository struct {
+	byID map[string]PlatformClientRecord
+	err  error
+}
+
+func (r *fakePlatformClientRepository) ReadPlatformClient(_ context.Context, clientID string) (PlatformClientRecord, bool, error) {
+	if r.err != nil {
+		return PlatformClientRecord{}, false, r.err
+	}
+	record, ok := r.byID[clientID]
+	return record, ok, nil
 }
