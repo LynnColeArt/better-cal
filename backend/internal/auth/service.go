@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"strings"
@@ -49,22 +50,52 @@ type Service struct {
 	oauthClientID        string
 	platformClientID     string
 	platformClientSecret string
+	apiKeyPrincipals     APIKeyPrincipalRepository
 }
 
-func NewService(cfg config.Config) *Service {
-	return &Service{
+type ServiceOption func(*Service)
+
+func WithAPIKeyPrincipalRepository(repo APIKeyPrincipalRepository) ServiceOption {
+	return func(s *Service) {
+		s.apiKeyPrincipals = repo
+	}
+}
+
+func NewService(cfg config.Config, opts ...ServiceOption) *Service {
+	service := &Service{
 		apiKey:               cfg.APIKey,
 		oauthClientID:        cfg.OAuthClientID,
 		platformClientID:     cfg.PlatformClientID,
 		platformClientSecret: cfg.PlatformClientSecret,
 	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
 }
 
 func (s *Service) AuthenticateAPIKey(authorization string) (Principal, bool) {
-	if !secureEqual(bearerToken(authorization), s.apiKey) {
-		return Principal{}, false
+	principal, ok, _ := s.AuthenticateAPIKeyContext(context.Background(), authorization)
+	return principal, ok
+}
+
+func (s *Service) AuthenticateAPIKeyContext(ctx context.Context, authorization string) (Principal, bool, error) {
+	token := bearerToken(authorization)
+	if s.apiKeyPrincipals != nil {
+		if token == "" {
+			return Principal{}, false, nil
+		}
+		return s.apiKeyPrincipals.ReadAPIKeyPrincipal(ctx, token)
 	}
 
+	if !secureEqual(token, s.apiKey) {
+		return Principal{}, false, nil
+	}
+
+	return FixtureAPIKeyPrincipal(), true, nil
+}
+
+func FixtureAPIKeyPrincipal() Principal {
 	return Principal{
 		ID:       123,
 		UUID:     "00000000-0000-4000-8000-000000000123",
@@ -79,7 +110,7 @@ func (s *Service) AuthenticateAPIKey(authorization string) (Principal, bool) {
 		},
 		CreatedAt: "2026-01-01T00:00:00.000Z",
 		UpdatedAt: "2026-01-01T00:00:00.000Z",
-	}, true
+	}
 }
 
 func (s *Service) OAuthClient(clientID string) (OAuthClient, bool) {

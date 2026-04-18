@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
@@ -34,6 +36,42 @@ func TestAuthenticateAPIKeyRejectsEmptyConfiguredSecret(t *testing.T) {
 	}
 	if _, ok := service.AuthenticateAPIKey("Bearer "); ok {
 		t.Fatal("empty bearer token unexpectedly authenticated")
+	}
+}
+
+func TestAuthenticateAPIKeyUsesRepositoryWhenConfigured(t *testing.T) {
+	service := NewService(testConfig(), WithAPIKeyPrincipalRepository(&fakeAPIKeyPrincipalRepository{
+		byToken: map[string]Principal{
+			"db-token": FixtureAPIKeyPrincipal(),
+		},
+	}))
+
+	principal, ok, err := service.AuthenticateAPIKeyContext(context.Background(), "Bearer db-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected repository token to authenticate")
+	}
+	if principal.Email != "fixture-user@example.test" {
+		t.Fatalf("email = %q", principal.Email)
+	}
+
+	if _, ok, err := service.AuthenticateAPIKeyContext(context.Background(), "Bearer cal_test_valid_mock"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("config token unexpectedly authenticated while repository was configured")
+	}
+}
+
+func TestAuthenticateAPIKeyReturnsRepositoryErrors(t *testing.T) {
+	sentinel := errors.New("repository unavailable")
+	service := NewService(testConfig(), WithAPIKeyPrincipalRepository(&fakeAPIKeyPrincipalRepository{
+		err: sentinel,
+	}))
+
+	if _, _, err := service.AuthenticateAPIKeyContext(context.Background(), "Bearer db-token"); !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -101,4 +139,17 @@ func testConfig() config.Config {
 		PlatformClientID:     "mock-platform-client",
 		PlatformClientSecret: "mock-platform-secret",
 	}
+}
+
+type fakeAPIKeyPrincipalRepository struct {
+	byToken map[string]Principal
+	err     error
+}
+
+func (r *fakeAPIKeyPrincipalRepository) ReadAPIKeyPrincipal(_ context.Context, token string) (Principal, bool, error) {
+	if r.err != nil {
+		return Principal{}, false, r.err
+	}
+	principal, ok := r.byToken[token]
+	return principal, ok, nil
 }

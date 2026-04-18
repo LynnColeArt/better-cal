@@ -37,6 +37,14 @@ func WithBookingStore(store *booking.Store) Option {
 	}
 }
 
+func WithAuthService(service *auth.Service) Option {
+	return func(s *Server) {
+		if service != nil {
+			s.authService = service
+		}
+	}
+}
+
 func NewServer(cfg config.Config, opts ...Option) http.Handler {
 	return NewServerWithLogger(cfg, slog.Default(), opts...)
 }
@@ -131,8 +139,8 @@ func decodeJSON(r *http.Request, target any) bool {
 	return json.NewDecoder(r.Body).Decode(target) == nil
 }
 
-func (s *Server) authenticateAPIKey(r *http.Request) (auth.Principal, bool) {
-	return s.authenticator().AuthenticateAPIKey(r.Header.Get("authorization"))
+func (s *Server) authenticateAPIKey(r *http.Request) (auth.Principal, bool, error) {
+	return s.authenticator().AuthenticateAPIKeyContext(r.Context(), r.Header.Get("authorization"))
 }
 
 func (s *Server) authenticator() *auth.Service {

@@ -59,12 +59,14 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var exists bool
-	if err := pool.QueryRow(ctx, `select exists(select 1 from information_schema.tables where table_name = 'booking_fixtures')`).Scan(&exists); err != nil {
-		t.Fatal(err)
-	}
-	if !exists {
-		t.Fatal("booking_fixtures table was not created")
+	for _, tableName := range []string{"booking_fixtures", "api_key_principals"} {
+		var exists bool
+		if err := pool.QueryRow(ctx, `select exists(select 1 from information_schema.tables where table_name = $1)`, tableName).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if !exists {
+			t.Fatalf("%s table was not created", tableName)
+		}
 	}
 }
 

@@ -2,10 +2,14 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 )
 
 func TestStarterAPIContractSlice(t *testing.T) {
@@ -80,6 +84,15 @@ func TestRequestIDPropagatesToResponse(t *testing.T) {
 	}
 }
 
+func TestAuthRepositoryErrorReturnsInternalError(t *testing.T) {
+	service := auth.NewService(testConfig(), auth.WithAPIKeyPrincipalRepository(erroringAPIKeyPrincipals{}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer cal_test_valid_mock", nil, http.StatusInternalServerError)
+}
+
 func assertStatus(t *testing.T, baseURL string, method string, path string, authorization string, body any, expected int) {
 	t.Helper()
 	var requestBody *bytes.Reader
@@ -120,4 +133,10 @@ func do(t *testing.T, req *http.Request) (*http.Response, []byte) {
 		t.Fatal(err)
 	}
 	return resp, body.Bytes()
+}
+
+type erroringAPIKeyPrincipals struct{}
+
+func (erroringAPIKeyPrincipals) ReadAPIKeyPrincipal(context.Context, string) (auth.Principal, bool, error) {
+	return auth.Principal{}, false, errors.New("repository unavailable")
 }

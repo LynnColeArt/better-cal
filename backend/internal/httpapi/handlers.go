@@ -15,7 +15,11 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
 		return
@@ -40,7 +44,11 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
 		return
@@ -69,7 +77,11 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "", true)
 		return
@@ -94,7 +106,11 @@ func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
 		return
@@ -129,7 +145,11 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
 		return
@@ -169,7 +189,11 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", false)
+		return
+	}
 	if !ok {
 		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "", false)
 		return

@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
@@ -36,6 +37,15 @@ func main() {
 			slog.Error("database migration failed", "error", err)
 			os.Exit(1)
 		}
+		principalRepository := auth.NewPostgresPrincipalRepository(pool)
+		if err := principalRepository.SaveAPIKeyPrincipal(ctx, cfg.APIKey, auth.FixtureAPIKeyPrincipal()); err != nil {
+			cancel()
+			slog.Error("api key principal seed failed", "error", err)
+			os.Exit(1)
+		}
+		serverOptions = append(serverOptions, httpapi.WithAuthService(
+			auth.NewService(cfg, auth.WithAPIKeyPrincipalRepository(principalRepository)),
+		))
 		serverOptions = append(serverOptions, httpapi.WithBookingStore(
 			booking.NewStoreWithRepository(booking.NewPostgresRepository(pool)),
 		))
