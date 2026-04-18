@@ -1,0 +1,125 @@
+package db
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func TestOpenRequiresDatabaseURL(t *testing.T) {
+	pool, err := Open(context.Background(), "")
+	if pool != nil {
+		t.Fatal("expected nil pool")
+	}
+	if !errors.Is(err, ErrMissingDatabaseURL) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPingRequiresPool(t *testing.T) {
+	if err := Ping(context.Background(), nil); !errors.Is(err, ErrNilPool) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestWithTxRequiresPool(t *testing.T) {
+	err := WithTx(context.Background(), nil, func(pgx.Tx) error {
+		t.Fatal("transaction callback should not run")
+		return nil
+	})
+	if !errors.Is(err, ErrNilPool) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestOpenPingWithComposePostgres(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := Ping(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWithTxCommitsAndRollsBack(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := pool.Exec(ctx, `
+		create table if not exists better_cal_tx_test (
+			id text primary key
+		)
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prefix := fmt.Sprintf("tx-%d-", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `drop table if exists better_cal_tx_test`)
+	})
+
+	committedID := prefix + "commit"
+	if err := WithTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into better_cal_tx_test (id) values ($1)`, committedID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertRowCount(t, ctx, pool, committedID, 1)
+
+	rolledBackID := prefix + "rollback"
+	sentinel := errors.New("rollback sentinel")
+	err = WithTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into better_cal_tx_test (id) values ($1)`, rolledBackID)
+		if err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v", err)
+	}
+	assertRowCount(t, ctx, pool, rolledBackID, 0)
+}
+
+func testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	databaseURL := os.Getenv("CALDIY_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = os.Getenv("CALDIY_DATABASE_URL")
+	}
+	if databaseURL == "" {
+		t.Skip("set CALDIY_TEST_DATABASE_URL or CALDIY_DATABASE_URL to run Postgres integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+func assertRowCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id string, expected int) {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(ctx, `select count(*) from better_cal_tx_test where id = $1`, id).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != expected {
+		t.Fatalf("row count for %q = %d, want %d", id, count, expected)
+	}
+}

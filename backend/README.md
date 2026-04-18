@@ -35,10 +35,16 @@ cd backend
 go test ./...
 ```
 
+Run the Postgres-backed database integration tests against the Compose database:
+
+```bash
+CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" go test ./internal/db
+```
+
 Run contract replay smoke from the repository root:
 
 ```bash
 node tools/backend-smoke/smoke-test.mjs
 ```
 
-The current state uses in-memory fixture data only. Persistence, provider integrations, and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.
+When `CALDIY_DATABASE_URL` is set, the API opens and pings Postgres at startup. The current booking lifecycle still uses in-memory fixture data only. Persistence, provider integrations, and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.

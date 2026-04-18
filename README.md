@@ -32,6 +32,13 @@ docker compose up --build
 
 The API listens on `http://localhost:8080`; Postgres is exposed on `localhost:54320` for local tooling. The backend receives `CALDIY_DATABASE_URL`, but the current implementation still uses in-memory fixture state until the persistence slice lands.
 
+Run the backend database integration tests against the Compose database:
+
+```bash
+cd backend
+CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" go test ./internal/db
+```
+
 Run contract validation inside Compose:
 
 ```bash
