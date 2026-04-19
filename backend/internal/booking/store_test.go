@@ -25,6 +25,9 @@ func TestCreateBookingAppliesDefaultsAndIdempotency(t *testing.T) {
 	if created.UID != PrimaryFixtureUID {
 		t.Fatalf("uid = %q", created.UID)
 	}
+	if created.End != FixtureBookingEnd {
+		t.Fatalf("end = %q", created.End)
+	}
 	if created.Attendees[0].ID != 321 {
 		t.Fatalf("attendee id = %d", created.Attendees[0].ID)
 	}
@@ -165,6 +168,9 @@ func TestRescheduleBookingCreatesOldAndNewBookings(t *testing.T) {
 	if result.NewBooking.Start != "2026-05-02T15:00:00.000Z" {
 		t.Fatalf("new start = %q", result.NewBooking.Start)
 	}
+	if result.NewBooking.End != "2026-05-02T15:30:00.000Z" {
+		t.Fatalf("new end = %q", result.NewBooking.End)
+	}
 
 	found, ok, err := store.Read(context.Background(), "read-request", RescheduledFixtureUID)
 	if err != nil {
@@ -175,6 +181,24 @@ func TestRescheduleBookingCreatesOldAndNewBookings(t *testing.T) {
 	}
 	if found.UID != RescheduledFixtureUID {
 		t.Fatalf("stored uid = %q", found.UID)
+	}
+}
+
+func TestCreateDerivesEndFromFixtureDuration(t *testing.T) {
+	store := NewStore(WithSlotAvailabilityPort(&capturingAvailabilityPort{available: true}))
+
+	created, duplicate, err := store.Create(context.Background(), "create-request", CreateRequest{
+		EventTypeID: FixtureEventTypeID,
+		Start:       "2026-08-01T10:15:00.000Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate {
+		t.Fatal("create was reported as duplicate")
+	}
+	if created.End != "2026-08-01T10:45:00.000Z" {
+		t.Fatalf("end = %q", created.End)
 	}
 }
 

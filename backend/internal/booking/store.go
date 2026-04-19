@@ -3,6 +3,7 @@ package booking
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
@@ -180,6 +181,10 @@ func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest)
 	if !available {
 		return Booking{}, false, validationError(errCodeSlotUnavailable, "Requested slot is unavailable")
 	}
+	end, err := endForStart(start)
+	if err != nil {
+		return Booking{}, false, err
+	}
 	responses := req.Responses
 	if responses == nil {
 		responses = map[string]any{}
@@ -191,6 +196,7 @@ func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest)
 
 	created := fixtureBooking(requestID, Booking{
 		Start: start,
+		End:   end,
 		Attendees: []Attendee{
 			attendeeValue,
 		},
@@ -280,10 +286,14 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 	if start == "" {
 		start = "2026-05-02T15:00:00.000Z"
 	}
+	end, err := endForStart(start)
+	if err != nil {
+		return RescheduleResult{}, false, err
+	}
 	newBooking := fixtureBooking(requestID, mergeBooking(existing, Booking{
 		UID:       RescheduledFixtureUID,
 		Start:     start,
-		End:       "2026-05-02T15:30:00.000Z",
+		End:       end,
 		UpdatedAt: "2026-01-01T00:10:00.000Z",
 	}))
 	plannedSideEffects, err := s.sideEffectPort().PlanBookingRescheduled(ctx, BookingRescheduledSideEffect{
@@ -339,6 +349,14 @@ func fixtureBooking(requestID string, overrides Booking) Booking {
 		RequestID: requestID,
 	}
 	return mergeBooking(base, overrides)
+}
+
+func endForStart(start string) (string, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, start)
+	if err != nil {
+		return "", validationError(errCodeInvalidStartTime, "Start time must be an RFC3339 timestamp")
+	}
+	return parsed.Add(time.Duration(slots.FixtureDuration) * time.Minute).UTC().Format("2006-01-02T15:04:05.000Z"), nil
 }
 
 func mergeBooking(base Booking, overrides Booking) Booking {
