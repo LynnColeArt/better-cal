@@ -331,6 +331,7 @@ export function createMockApiV2Server() {
       const newBooking = bookingPayload({
         ...existing,
         uid: "mock-booking-rescheduled",
+        status: "accepted",
         start: body.start ?? "2026-05-02T15:00:00.000Z",
         end: "2026-05-02T15:30:00.000Z",
         updatedAt: "2026-01-01T00:10:00.000Z",

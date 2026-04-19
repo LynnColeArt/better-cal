@@ -190,6 +190,18 @@ func TestSeedFixtureAvailabilityIsReadable(t *testing.T) {
 	if !available {
 		t.Fatal("seeded fixture slot was not available")
 	}
+
+	available, err = service.IsAvailable(ctx, "fixture-reschedule-seed-request", AvailabilityRequest{
+		EventTypeID: FixtureEventTypeID,
+		Start:       FixtureReschedule,
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available {
+		t.Fatal("seeded fixture reschedule slot was not available")
+	}
 }
 
 func TestPostgresRepositoryReturnsFalseForUnknownEventType(t *testing.T) {

@@ -157,7 +157,12 @@ func SeedFixtureAvailability(ctx context.Context, repo Repository) error {
 	if err := repo.SaveEventType(ctx, FixtureEventType()); err != nil {
 		return err
 	}
-	return repo.SaveAvailabilitySlot(ctx, FixtureAvailabilitySlot())
+	for _, slot := range FixtureAvailabilitySlots() {
+		if err := repo.SaveAvailabilitySlot(ctx, slot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func slotDay(slotTime string, timeZone string) (string, error) {

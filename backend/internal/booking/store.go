@@ -286,12 +286,30 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 	if start == "" {
 		start = "2026-05-02T15:00:00.000Z"
 	}
+	eventTypeID := existing.EventTypeID
+	if eventTypeID == 0 {
+		eventTypeID = FixtureEventTypeID
+	}
+	timeZone := bookingTimeZone(existing)
+	available, err := s.availabilityPort().IsSlotAvailable(ctx, SlotAvailabilityRequest{
+		RequestID:   requestID,
+		EventTypeID: eventTypeID,
+		Start:       start,
+		TimeZone:    timeZone,
+	})
+	if err != nil {
+		return RescheduleResult{}, false, err
+	}
+	if !available {
+		return RescheduleResult{}, false, validationError(errCodeSlotUnavailable, "Requested slot is unavailable")
+	}
 	end, err := endForStart(start)
 	if err != nil {
 		return RescheduleResult{}, false, err
 	}
 	newBooking := fixtureBooking(requestID, mergeBooking(existing, Booking{
 		UID:       RescheduledFixtureUID,
+		Status:    "accepted",
 		Start:     start,
 		End:       end,
 		UpdatedAt: "2026-01-01T00:10:00.000Z",
@@ -357,6 +375,15 @@ func endForStart(start string) (string, error) {
 		return "", validationError(errCodeInvalidStartTime, "Start time must be an RFC3339 timestamp")
 	}
 	return parsed.Add(time.Duration(slots.FixtureDuration) * time.Minute).UTC().Format("2006-01-02T15:04:05.000Z"), nil
+}
+
+func bookingTimeZone(booking Booking) string {
+	for _, attendee := range booking.Attendees {
+		if attendee.TimeZone != "" {
+			return attendee.TimeZone
+		}
+	}
+	return FixtureTimeZone
 }
 
 func mergeBooking(base Booking, overrides Booking) Booking {

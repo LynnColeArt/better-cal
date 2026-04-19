@@ -15,6 +15,7 @@ const (
 	FixtureEnd         = "2026-05-02T00:00:00.000Z"
 	FixtureTimeZone    = "America/Chicago"
 	FixtureSlotTime    = "2026-05-01T15:00:00.000Z"
+	FixtureReschedule  = "2026-05-02T15:00:00.000Z"
 	FixtureDuration    = 30
 )
 
@@ -158,12 +159,8 @@ func (s *Service) ReadAvailable(ctx context.Context, requestID string, req Reque
 		TimeZone:    req.TimeZone,
 		Start:       req.Start,
 		End:         req.End,
-		Slots: map[string][]Slot{
-			"2026-05-01": {
-				{Time: FixtureSlotTime, Duration: FixtureDuration},
-			},
-		},
-		RequestID: requestID,
+		Slots:       fixtureSlotsInRange(req),
+		RequestID:   requestID,
 	}
 	return s.filterBusySlots(ctx, req, response)
 }
@@ -245,6 +242,45 @@ func FixtureAvailabilitySlot() AvailabilitySlot {
 		Duration:    FixtureDuration,
 		TimeZone:    FixtureTimeZone,
 	}
+}
+
+func FixtureAvailabilitySlots() []AvailabilitySlot {
+	return []AvailabilitySlot{
+		FixtureAvailabilitySlot(),
+		{
+			EventTypeID: FixtureEventTypeID,
+			Time:        FixtureReschedule,
+			Duration:    FixtureDuration,
+			TimeZone:    FixtureTimeZone,
+		},
+	}
+}
+
+func fixtureSlotsInRange(req Request) map[string][]Slot {
+	startAt, err := time.Parse(time.RFC3339Nano, req.Start)
+	if err != nil {
+		return map[string][]Slot{}
+	}
+	endAt, err := time.Parse(time.RFC3339Nano, req.End)
+	if err != nil {
+		return map[string][]Slot{}
+	}
+	slotsByDay := map[string][]Slot{}
+	for _, fixtureSlot := range FixtureAvailabilitySlots() {
+		slotAt, err := time.Parse(time.RFC3339Nano, fixtureSlot.Time)
+		if err != nil {
+			continue
+		}
+		if slotAt.Before(startAt) || !slotAt.Before(endAt) {
+			continue
+		}
+		day := slotAt.Format("2006-01-02")
+		slotsByDay[day] = append(slotsByDay[day], Slot{
+			Time:     fixtureSlot.Time,
+			Duration: fixtureSlot.Duration,
+		})
+	}
+	return slotsByDay
 }
 
 func normalizedRequest(req Request) Request {

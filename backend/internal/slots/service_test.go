@@ -27,6 +27,29 @@ func TestReadAvailableReturnsFixtureSlots(t *testing.T) {
 	if result.Slots["2026-05-01"][0].Time != FixtureSlotTime {
 		t.Fatalf("slot time = %q", result.Slots["2026-05-01"][0].Time)
 	}
+	if _, ok := result.Slots["2026-05-02"]; ok {
+		t.Fatalf("response included out-of-range reschedule slot: %#v", result.Slots)
+	}
+}
+
+func TestReadAvailableReturnsFixtureRescheduleSlot(t *testing.T) {
+	service := NewService()
+
+	result, ok, err := service.ReadAvailable(context.Background(), "slot-request", Request{
+		EventTypeID: FixtureEventTypeID,
+		Start:       "2026-05-02T00:00:00.000Z",
+		End:         "2026-05-03T00:00:00.000Z",
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("fixture event type was not found")
+	}
+	if result.Slots["2026-05-02"][0].Time != FixtureReschedule {
+		t.Fatalf("slot time = %q", result.Slots["2026-05-02"][0].Time)
+	}
 }
 
 func TestReadAvailableFiltersBusySlots(t *testing.T) {
@@ -106,6 +129,22 @@ func TestIsAvailableMatchesFixtureSlot(t *testing.T) {
 	}
 	if !available {
 		t.Fatal("fixture slot was not available")
+	}
+}
+
+func TestIsAvailableMatchesFixtureRescheduleSlot(t *testing.T) {
+	service := NewService()
+
+	available, err := service.IsAvailable(context.Background(), "slot-request", AvailabilityRequest{
+		EventTypeID: FixtureEventTypeID,
+		Start:       FixtureReschedule,
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available {
+		t.Fatal("fixture reschedule slot was not available")
 	}
 }
 

@@ -3,6 +3,8 @@ package booking
 import (
 	"context"
 	"testing"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
 
 func TestCreateBookingAppliesDefaultsAndIdempotency(t *testing.T) {
@@ -165,6 +167,9 @@ func TestRescheduleBookingCreatesOldAndNewBookings(t *testing.T) {
 	if result.NewBooking.UID != RescheduledFixtureUID {
 		t.Fatalf("new uid = %q", result.NewBooking.UID)
 	}
+	if result.NewBooking.Status != "accepted" {
+		t.Fatalf("new status = %q", result.NewBooking.Status)
+	}
 	if result.NewBooking.Start != "2026-05-02T15:00:00.000Z" {
 		t.Fatalf("new start = %q", result.NewBooking.Start)
 	}
@@ -181,6 +186,31 @@ func TestRescheduleBookingCreatesOldAndNewBookings(t *testing.T) {
 	}
 	if found.UID != RescheduledFixtureUID {
 		t.Fatalf("stored uid = %q", found.UID)
+	}
+}
+
+func TestRescheduleCreatesAcceptedNewBookingAfterCancellation(t *testing.T) {
+	store := NewStore()
+	if _, ok, err := store.Cancel(context.Background(), "cancel-request", PrimaryFixtureUID, CancelRequest{}); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("booking was not cancelled")
+	}
+
+	result, ok, err := store.Reschedule(context.Background(), "reschedule-request", PrimaryFixtureUID, RescheduleRequest{
+		Start: slots.FixtureReschedule,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("booking was not rescheduled")
+	}
+	if result.OldBooking.Status != "cancelled" {
+		t.Fatalf("old status = %q", result.OldBooking.Status)
+	}
+	if result.NewBooking.Status != "accepted" {
+		t.Fatalf("new status = %q", result.NewBooking.Status)
 	}
 }
 

@@ -128,6 +128,64 @@ func TestCreateIdempotencyReplayDoesNotCheckDiscardedSlot(t *testing.T) {
 	}
 }
 
+func TestRescheduleChecksSlotAvailability(t *testing.T) {
+	port := &capturingAvailabilityPort{available: true}
+	store := NewStore(WithSlotAvailabilityPort(port))
+
+	result, ok, err := store.Reschedule(context.Background(), "reschedule-request", PrimaryFixtureUID, RescheduleRequest{
+		Start: slots.FixtureReschedule,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("booking was not rescheduled")
+	}
+	if result.NewBooking.Start != slots.FixtureReschedule {
+		t.Fatalf("new start = %q", result.NewBooking.Start)
+	}
+	if len(port.requests) != 1 {
+		t.Fatalf("availability checks = %d", len(port.requests))
+	}
+	request := port.requests[0]
+	if request.RequestID != "reschedule-request" {
+		t.Fatalf("request id = %q", request.RequestID)
+	}
+	if request.EventTypeID != FixtureEventTypeID {
+		t.Fatalf("event type id = %d", request.EventTypeID)
+	}
+	if request.Start != slots.FixtureReschedule {
+		t.Fatalf("availability start = %q", request.Start)
+	}
+	if request.TimeZone != FixtureTimeZone {
+		t.Fatalf("time zone = %q", request.TimeZone)
+	}
+}
+
+func TestRescheduleRejectsUnavailableSlot(t *testing.T) {
+	store := NewStore(WithSlotAvailabilityPort(&capturingAvailabilityPort{}))
+
+	result, ok, err := store.Reschedule(context.Background(), "reschedule-request", PrimaryFixtureUID, RescheduleRequest{
+		Start: "2026-05-04T15:00:00.000Z",
+	})
+
+	if ok {
+		t.Fatalf("reschedule succeeded: %#v", result)
+	}
+	assertValidationCode(t, err, errCodeSlotUnavailable)
+
+	found, foundOK, readErr := store.Read(context.Background(), "read-request", PrimaryFixtureUID)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !foundOK {
+		t.Fatal("primary booking was not found after rejected reschedule")
+	}
+	if found.Status != "accepted" {
+		t.Fatalf("status = %q", found.Status)
+	}
+}
+
 type capturingAvailabilityPort struct {
 	requests  []SlotAvailabilityRequest
 	available bool

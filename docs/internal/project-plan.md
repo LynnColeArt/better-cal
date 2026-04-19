@@ -136,7 +136,7 @@ Exit criteria:
 
 - slot golden tests match legacy for representative scenarios;
 - performance is measured against existing heavy slot paths;
-- booking creation can call the Go slot engine in validation-only mode. The first slot-service adapter rejects unavailable create requests before persistence, can read the fixture slot from Postgres, and filters accepted internal bookings.
+- booking creation and reschedule can call the Go slot engine in validation-only mode. The first slot-service adapter rejects unavailable create and reschedule requests before persistence, can read fixture slots from Postgres, and filters accepted internal bookings.
 
 ## Phase 5: Booking Write Path
 
