@@ -59,6 +59,16 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/cancel", "Bearer cal_test_valid_mock", map[string]any{"cancellationReason": "Fixture cancellation"}, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/reschedule", "Bearer cal_test_valid_mock", map[string]any{"start": "2026-05-02T15:00:00.000Z"}, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings", "Bearer cal_test_unauthorized_mock", createBody, http.StatusForbidden)
+	unavailableBody := map[string]any{
+		"eventTypeId": 1001,
+		"start":       "2026-05-01T16:00:00.000Z",
+		"attendee": map[string]any{
+			"name":     "Unavailable Slot Fixture",
+			"email":    "unavailable-slot@example.test",
+			"timeZone": "America/Chicago",
+		},
+	}
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings", "Bearer cal_test_valid_mock", unavailableBody, http.StatusBadRequest)
 }
 
 func TestSlotsResponseContainsFixtureSlot(t *testing.T) {

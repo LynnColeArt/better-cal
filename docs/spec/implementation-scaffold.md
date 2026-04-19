@@ -129,7 +129,7 @@ Adapters should not:
 8. One low-risk persisted read/write route. Started with the booking fixture canary and idempotency key repository in `backend/internal/booking/`; booking fields now also write explicit `bookings` and `booking_attendees` rows before falling back to JSON fixtures.
 9. Next.js tRPC bridge proof of concept for one query and one mutation.
 10. Slot read fixture replay. Started with `GET /v2/slots` fixture capture, a source-neutral `backend/internal/slots/` service, and replay coverage for the personal event type canary.
-11. Booking validation service with durable state and side-effect ports. Fixture lifecycle behavior, explicit booking row persistence, and the first persistence canary have started in `backend/internal/booking/`; request validation now rejects unsupported fixture event types, malformed times, invalid attendee contact data, and secret-bearing echoed maps. Cancel and reschedule now plan calendar, email, and webhook side effects through typed fixture ports that receive minimal booking snapshots rather than raw response or metadata maps.
+11. Booking validation service with durable state and side-effect ports. Fixture lifecycle behavior, explicit booking row persistence, and the first persistence canary have started in `backend/internal/booking/`; request validation now rejects unsupported fixture event types, malformed times, invalid attendee contact data, secret-bearing echoed maps, and unavailable fixture slots. Cancel and reschedule now plan calendar, email, and webhook side effects through typed fixture ports that receive minimal booking snapshots rather than raw response or metadata maps.
 
 ## Testing Layers
 

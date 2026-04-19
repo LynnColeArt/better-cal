@@ -212,6 +212,20 @@ export function createMockApiV2Server() {
         return;
       }
 
+      const requestedStart = body.start ?? "2026-05-01T15:00:00.000Z";
+      const requestedTimeZone = body.attendee?.timeZone ?? "America/Chicago";
+      if (body.eventTypeId === 1001 && (requestedStart !== "2026-05-01T15:00:00.000Z" || requestedTimeZone !== "America/Chicago")) {
+        sendJson(res, 400, {
+          status: "error",
+          error: {
+            code: "SLOT_UNAVAILABLE",
+            message: "Requested slot is unavailable",
+            requestId: "mock-request-id",
+          },
+        });
+        return;
+      }
+
       const idempotencyKey = body.idempotencyKey;
       if (idempotencyKey && idempotency.has(idempotencyKey)) {
         sendJson(res, 200, {
@@ -222,7 +236,7 @@ export function createMockApiV2Server() {
       }
 
       const booking = bookingPayload({
-        start: body.start ?? "2026-05-01T15:00:00.000Z",
+        start: requestedStart,
         attendees: [
           {
             id: 321,

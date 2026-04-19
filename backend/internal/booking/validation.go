@@ -14,6 +14,7 @@ const (
 	errCodeInvalidStartTime     = "INVALID_START_TIME"
 	errCodeInvalidTimeZone      = "INVALID_TIME_ZONE"
 	errCodeSecretField          = "SECRET_FIELD_NOT_ALLOWED"
+	errCodeSlotUnavailable      = "SLOT_UNAVAILABLE"
 )
 
 type BookingValidator interface {
@@ -90,7 +91,7 @@ func validateTimestamp(value string, code string) error {
 
 func validTimeZone(value string) bool {
 	switch value {
-	case "UTC", "Etc/UTC", "America/Chicago":
+	case "UTC", "Etc/UTC", FixtureTimeZone:
 		return true
 	}
 	_, err := time.LoadLocation(value)

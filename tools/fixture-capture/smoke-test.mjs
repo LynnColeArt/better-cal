@@ -50,6 +50,8 @@ function assertCaptured(outputRoot, manifestId, fixtureId, expectedStatus) {
   assert(!responseText.includes("fixture-attendee@example.test"), `${fixtureId}: response attendee email was not redacted`);
   assert(!requestText.includes("unauthorized-fixture@example.test"), `${fixtureId}: unauthorized email was not redacted`);
   assert(!responseText.includes("unauthorized-fixture@example.test"), `${fixtureId}: response unauthorized email was not redacted`);
+  assert(!requestText.includes("unavailable-slot@example.test"), `${fixtureId}: unavailable slot email was not redacted`);
+  assert(!responseText.includes("unavailable-slot@example.test"), `${fixtureId}: response unavailable slot email was not redacted`);
   assert(!requestText.includes("super-secret-fixture"), `${fixtureId}: secret-bearing metadata was not redacted`);
   assert(!responseText.includes("super-secret-fixture"), `${fixtureId}: response echoed secret-bearing metadata`);
 }
@@ -194,6 +196,7 @@ try {
   assertCaptured(outputRoot, "booking-lifecycle", "booking.reschedule.owner", 200);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.unauthorized-user-denied", 403);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.secret-field-denied", 400);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.create.unavailable-slot-denied", 400);
   assertCaptured(outputRoot, "slots", "slots.read.personal-basic", 200);
 
   console.log(combinedStdout.trim());

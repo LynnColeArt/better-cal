@@ -105,7 +105,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.write",
       "schemaRefs": ["schema.api-v2.booking.create.request", "schema.api-v2.booking.create.response"],
-      "fixtureRefs": ["booking.create.personal-basic", "booking.create.duplicate-idempotency-key", "booking.create.unauthorized-user-denied", "booking.create.secret-field-denied"]
+      "fixtureRefs": ["booking.create.personal-basic", "booking.create.duplicate-idempotency-key", "booking.create.unauthorized-user-denied", "booking.create.secret-field-denied", "booking.create.unavailable-slot-denied"]
     },
     {
       "id": "api-v2.bookings.get",

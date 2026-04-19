@@ -136,7 +136,7 @@ Exit criteria:
 
 - slot golden tests match legacy for representative scenarios;
 - performance is measured against existing heavy slot paths;
-- booking creation can call the Go slot engine in validation-only mode.
+- booking creation can call the Go slot engine in validation-only mode. The first fixture port now rejects unavailable create requests before persistence.
 
 ## Phase 5: Booking Write Path
 

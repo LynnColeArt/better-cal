@@ -9,6 +9,9 @@ const (
 	PrimaryFixtureUID     = "mock-booking-personal-basic"
 	RescheduledFixtureUID = "mock-booking-rescheduled"
 	FixtureEventTypeID    = 1001
+	FixtureBookingStart   = "2026-05-01T15:00:00.000Z"
+	FixtureBookingEnd     = "2026-05-01T15:30:00.000Z"
+	FixtureTimeZone       = "America/Chicago"
 )
 
 type Attendee struct {
@@ -67,6 +70,7 @@ type Store struct {
 	mu               sync.Mutex
 	repo             Repository
 	bookingValidator BookingValidator
+	slotAvailability SlotAvailabilityPort
 	sideEffects      SideEffectPort
 	bookings         map[string]Booking
 	idempotency      map[string]string
@@ -88,9 +92,18 @@ func WithSideEffectPort(port SideEffectPort) StoreOption {
 	}
 }
 
+func WithSlotAvailabilityPort(port SlotAvailabilityPort) StoreOption {
+	return func(s *Store) {
+		if port != nil {
+			s.slotAvailability = port
+		}
+	}
+}
+
 func NewStore(opts ...StoreOption) *Store {
 	store := &Store{
 		bookingValidator: DefaultValidator{},
+		slotAvailability: FixtureSlotAvailabilityPort{},
 		sideEffects:      FixtureSideEffectPort{},
 		bookings:         make(map[string]Booking),
 		idempotency:      make(map[string]string),
@@ -141,13 +154,28 @@ func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest)
 		attendeeValue.Email = "fixture-attendee@example.test"
 	}
 	if attendeeValue.TimeZone == "" {
-		attendeeValue.TimeZone = "America/Chicago"
+		attendeeValue.TimeZone = FixtureTimeZone
 	}
 	attendeeValue.ID = 321
 
 	start := req.Start
 	if start == "" {
-		start = "2026-05-01T15:00:00.000Z"
+		start = FixtureBookingStart
+	}
+	eventTypeID := req.EventTypeID
+	if eventTypeID == 0 {
+		eventTypeID = FixtureEventTypeID
+	}
+	available, err := s.availabilityPort().IsSlotAvailable(ctx, SlotAvailabilityRequest{
+		EventTypeID: eventTypeID,
+		Start:       start,
+		TimeZone:    attendeeValue.TimeZone,
+	})
+	if err != nil {
+		return Booking{}, false, err
+	}
+	if !available {
+		return Booking{}, false, validationError(errCodeSlotUnavailable, "Requested slot is unavailable")
 	}
 	responses := req.Responses
 	if responses == nil {
@@ -285,15 +313,15 @@ func fixtureBooking(requestID string, overrides Booking) Booking {
 		ID:          987,
 		Title:       "Fixture Event",
 		Status:      "accepted",
-		Start:       "2026-05-01T15:00:00.000Z",
-		End:         "2026-05-01T15:30:00.000Z",
+		Start:       FixtureBookingStart,
+		End:         FixtureBookingEnd,
 		EventTypeID: FixtureEventTypeID,
 		Attendees: []Attendee{
 			{
 				ID:       321,
 				Name:     "Fixture Attendee",
 				Email:    "fixture-attendee@example.test",
-				TimeZone: "America/Chicago",
+				TimeZone: FixtureTimeZone,
 			},
 		},
 		Responses: map[string]any{
@@ -389,6 +417,13 @@ func (s *Store) validator() BookingValidator {
 		return s.bookingValidator
 	}
 	return DefaultValidator{}
+}
+
+func (s *Store) availabilityPort() SlotAvailabilityPort {
+	if s.slotAvailability != nil {
+		return s.slotAvailability
+	}
+	return FixtureSlotAvailabilityPort{}
 }
 
 func (s *Store) sideEffectPort() SideEffectPort {

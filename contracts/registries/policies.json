@@ -73,7 +73,7 @@
       "principalTypes": ["user", "platform-client", "managed-user", "anonymous-token-holder"],
       "requiredPermissions": ["booking:write"],
       "resourceResolver": "booking-target-event-type",
-      "negativeFixtures": ["booking.create.unauthorized-user-denied", "wrong-owner", "wrong-organization", "unavailable-slot"]
+      "negativeFixtures": ["booking.create.unauthorized-user-denied", "booking.create.unavailable-slot-denied", "wrong-owner", "wrong-organization"]
     },
     {
       "id": "policy.booking.host-action",
