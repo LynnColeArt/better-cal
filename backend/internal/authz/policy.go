@@ -10,6 +10,7 @@ const (
 	PolicyPlatformClientRead Policy = "policy.platform-client.read"
 	PolicyBookingRead        Policy = "policy.booking.read"
 	PolicyBookingWrite       Policy = "policy.booking.write"
+	PolicyBookingHostAction  Policy = "policy.booking.host-action"
 	PolicySlotsRead          Policy = "policy.slots.read"
 )
 
@@ -30,6 +31,7 @@ func NewAuthorizer() *Authorizer {
 			PolicyPlatformClientRead: {"platform-client:read"},
 			PolicyBookingRead:        {"booking:read"},
 			PolicyBookingWrite:       {"booking:write"},
+			PolicyBookingHostAction:  {"booking:host-action"},
 			PolicySlotsRead:          {},
 		},
 	}

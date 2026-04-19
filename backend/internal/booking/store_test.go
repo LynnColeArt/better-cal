@@ -214,6 +214,55 @@ func TestRescheduleCreatesAcceptedNewBookingAfterCancellation(t *testing.T) {
 	}
 }
 
+func TestConfirmPendingBooking(t *testing.T) {
+	store := NewStore()
+
+	result, ok, err := store.Confirm(context.Background(), "confirm-request", PendingConfirmFixtureUID, ConfirmRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("booking was not confirmed")
+	}
+	if result.Booking.Status != "accepted" {
+		t.Fatalf("status = %q", result.Booking.Status)
+	}
+	if len(result.SideEffects) != 2 {
+		t.Fatalf("side effects = %v", result.SideEffects)
+	}
+
+	found, ok, err := store.Read(context.Background(), "read-request", PendingConfirmFixtureUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("confirmed booking was not found")
+	}
+	if found.Status != "accepted" {
+		t.Fatalf("stored status = %q", found.Status)
+	}
+}
+
+func TestDeclinePendingBooking(t *testing.T) {
+	store := NewStore()
+
+	result, ok, err := store.Decline(context.Background(), "decline-request", PendingDeclineFixtureUID, DeclineRequest{
+		Reason: "Fixture decline",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("booking was not declined")
+	}
+	if result.Booking.Status != "rejected" {
+		t.Fatalf("status = %q", result.Booking.Status)
+	}
+	if len(result.SideEffects) != 2 {
+		t.Fatalf("side effects = %v", result.SideEffects)
+	}
+}
+
 func TestCreateDerivesEndFromFixtureDuration(t *testing.T) {
 	store := NewStore(WithSlotAvailabilityPort(&capturingAvailabilityPort{available: true}))
 
@@ -244,6 +293,16 @@ func TestLifecycleMethodsReturnFalseForMissingBookings(t *testing.T) {
 		t.Fatal(err)
 	} else if ok {
 		t.Fatal("missing booking was rescheduled")
+	}
+	if _, ok, err := store.Confirm(context.Background(), "request-id", "missing", ConfirmRequest{}); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("missing booking was confirmed")
+	}
+	if _, ok, err := store.Decline(context.Background(), "request-id", "missing", DeclineRequest{}); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("missing booking was declined")
 	}
 }
 

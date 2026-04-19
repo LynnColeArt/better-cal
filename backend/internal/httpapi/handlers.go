@@ -215,6 +215,84 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) confirmBooking(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyBookingHostAction) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+
+	var body booking.ConfirmRequest
+	if !decodeJSON(r, &body) {
+		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
+		return
+	}
+
+	uid := r.PathValue("bookingUid")
+	result, ok, err := s.bookings().Confirm(r.Context(), s.requestID(r), uid, body)
+	if err != nil {
+		s.sendBookingServiceError(w, r, err)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, map[string]any{
+		"status":      "success",
+		"data":        result.Booking,
+		"sideEffects": result.SideEffects,
+	})
+}
+
+func (s *Server) declineBooking(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyBookingHostAction) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+
+	var body booking.DeclineRequest
+	if !decodeJSON(r, &body) {
+		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
+		return
+	}
+
+	uid := r.PathValue("bookingUid")
+	result, ok, err := s.bookings().Decline(r.Context(), s.requestID(r), uid, body)
+	if err != nil {
+		s.sendBookingServiceError(w, r, err)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, map[string]any{
+		"status":      "success",
+		"data":        result.Booking,
+		"sideEffects": result.SideEffects,
+	})
+}
+
 func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 	principal, ok, err := s.authenticateAPIKey(r)
 	if err != nil {

@@ -146,10 +146,10 @@ Deliverables:
 
 - booking aggregate service with transactional writes;
 - attendee, guest, seat, recurring, no-show, reassignment, report, and internal-note behavior;
-- calendar event create/update/delete provider ports; cancel and reschedule now start with typed fixture side-effect planners;
+- calendar event create/update/delete provider ports; cancel, reschedule, confirm, and decline now start with typed fixture side-effect planners;
 - conferencing creation and cleanup ports;
-- email enqueueing; cancel and reschedule now expose planned fixture email effects through the same port boundary;
-- webhook emission; cancel and reschedule now expose planned fixture webhook effects through the same port boundary;
+- email enqueueing; cancel, reschedule, confirm, and decline now expose planned fixture email effects through the same port boundary;
+- webhook emission; cancel, reschedule, confirm, and decline now expose planned fixture webhook effects through the same port boundary;
 - payment state integration;
 - idempotency and retry semantics.
 

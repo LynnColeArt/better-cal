@@ -88,6 +88,22 @@ func TestRescheduleRejectsInvalidStartTime(t *testing.T) {
 	assertValidationCode(t, err, errCodeInvalidStartTime)
 }
 
+func TestConfirmRejectsAcceptedBooking(t *testing.T) {
+	store := NewStore()
+
+	_, _, err := store.Confirm(context.Background(), "request-id", PrimaryFixtureUID, ConfirmRequest{})
+
+	assertValidationCode(t, err, errCodeInvalidBookingStatus)
+}
+
+func TestDeclineRejectsAcceptedBooking(t *testing.T) {
+	store := NewStore()
+
+	_, _, err := store.Decline(context.Background(), "request-id", PrimaryFixtureUID, DeclineRequest{})
+
+	assertValidationCode(t, err, errCodeInvalidBookingStatus)
+}
+
 func assertValidationCode(t *testing.T, err error, expectedCode string) {
 	t.Helper()
 	validationErr, ok := ValidationFromError(err)

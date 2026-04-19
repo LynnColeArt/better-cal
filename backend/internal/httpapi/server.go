@@ -132,6 +132,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v2/bookings/{bookingUid}", s.readBooking)
 	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/cancel", s.cancelBooking)
 	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/reschedule", s.rescheduleBooking)
+	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/confirm", s.confirmBooking)
+	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/decline", s.declineBooking)
 	s.mux.HandleFunc("GET /v2/auth/oauth2/clients/{clientId}", s.oauthClientMetadata)
 	s.mux.HandleFunc("GET /v2/oauth-clients/{clientId}", s.platformClient)
 }

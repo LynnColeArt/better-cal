@@ -55,6 +55,18 @@ func TestAuthorizerDoesNotTreatReadAsWrite(t *testing.T) {
 	}
 }
 
+func TestAuthorizerDoesNotTreatBookingWriteAsHostAction(t *testing.T) {
+	authorizer := NewAuthorizer()
+	decision := authorizer.Authorize(auth.Principal{
+		Type:        "user",
+		Permissions: []string{"booking:read", "booking:write"},
+	}, PolicyBookingHostAction)
+
+	if decision.Allowed {
+		t.Fatal("booking:write principal was allowed to perform host action")
+	}
+}
+
 func TestPolicyConstantsExistInContractRegistry(t *testing.T) {
 	raw, err := os.ReadFile("../../../contracts/registries/policies.json")
 	if err != nil {
@@ -80,6 +92,7 @@ func TestPolicyConstantsExistInContractRegistry(t *testing.T) {
 		PolicyPlatformClientRead,
 		PolicyBookingRead,
 		PolicyBookingWrite,
+		PolicyBookingHostAction,
 		PolicySlotsRead,
 	} {
 		if !registered[string(policy)] {

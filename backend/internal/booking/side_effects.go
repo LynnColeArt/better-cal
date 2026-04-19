@@ -11,11 +11,17 @@ const (
 	SideEffectCalendarRescheduled       SideEffectName = "calendar.rescheduled"
 	SideEffectEmailRescheduled          SideEffectName = "email.rescheduled"
 	SideEffectWebhookBookingRescheduled SideEffectName = "webhook.booking.rescheduled"
+	SideEffectEmailConfirmed            SideEffectName = "email.confirmed"
+	SideEffectWebhookBookingConfirmed   SideEffectName = "webhook.booking.confirmed"
+	SideEffectEmailDeclined             SideEffectName = "email.declined"
+	SideEffectWebhookBookingDeclined    SideEffectName = "webhook.booking.declined"
 )
 
 type SideEffectPort interface {
 	PlanBookingCancelled(context.Context, BookingCancelledSideEffect) ([]PlannedSideEffect, error)
 	PlanBookingRescheduled(context.Context, BookingRescheduledSideEffect) ([]PlannedSideEffect, error)
+	PlanBookingConfirmed(context.Context, BookingConfirmedSideEffect) ([]PlannedSideEffect, error)
+	PlanBookingDeclined(context.Context, BookingDeclinedSideEffect) ([]PlannedSideEffect, error)
 }
 
 type PlannedSideEffect struct {
@@ -33,6 +39,15 @@ type BookingRescheduledSideEffect struct {
 	OldBooking         BookingSideEffectSnapshot
 	NewBooking         BookingSideEffectSnapshot
 	ReschedulingReason string
+}
+
+type BookingConfirmedSideEffect struct {
+	Booking BookingSideEffectSnapshot
+}
+
+type BookingDeclinedSideEffect struct {
+	Booking BookingSideEffectSnapshot
+	Reason  string
 }
 
 type BookingSideEffectSnapshot struct {
@@ -59,6 +74,20 @@ func (FixtureSideEffectPort) PlanBookingRescheduled(_ context.Context, event Boo
 		{Name: SideEffectCalendarRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
 		{Name: SideEffectEmailRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
 		{Name: SideEffectWebhookBookingRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
+	}, nil
+}
+
+func (FixtureSideEffectPort) PlanBookingConfirmed(_ context.Context, event BookingConfirmedSideEffect) ([]PlannedSideEffect, error) {
+	return []PlannedSideEffect{
+		{Name: SideEffectEmailConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectWebhookBookingConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+	}, nil
+}
+
+func (FixtureSideEffectPort) PlanBookingDeclined(_ context.Context, event BookingDeclinedSideEffect) ([]PlannedSideEffect, error) {
+	return []PlannedSideEffect{
+		{Name: SideEffectEmailDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectWebhookBookingDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
 	}, nil
 }
 

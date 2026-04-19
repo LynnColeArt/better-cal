@@ -9,12 +9,14 @@ import (
 )
 
 const (
-	PrimaryFixtureUID     = "mock-booking-personal-basic"
-	RescheduledFixtureUID = "mock-booking-rescheduled"
-	FixtureEventTypeID    = slots.FixtureEventTypeID
-	FixtureBookingStart   = slots.FixtureSlotTime
-	FixtureBookingEnd     = "2026-05-01T15:30:00.000Z"
-	FixtureTimeZone       = slots.FixtureTimeZone
+	PrimaryFixtureUID        = "mock-booking-personal-basic"
+	RescheduledFixtureUID    = "mock-booking-rescheduled"
+	PendingConfirmFixtureUID = "mock-booking-pending-confirm"
+	PendingDeclineFixtureUID = "mock-booking-pending-decline"
+	FixtureEventTypeID       = slots.FixtureEventTypeID
+	FixtureBookingStart      = slots.FixtureSlotTime
+	FixtureBookingEnd        = "2026-05-01T15:30:00.000Z"
+	FixtureTimeZone          = slots.FixtureTimeZone
 )
 
 type Attendee struct {
@@ -58,7 +60,18 @@ type RescheduleRequest struct {
 	ReschedulingReason string `json:"reschedulingReason"`
 }
 
+type ConfirmRequest struct{}
+
+type DeclineRequest struct {
+	Reason string `json:"reason"`
+}
+
 type CancelResult struct {
+	Booking     Booking
+	SideEffects []string
+}
+
+type LifecycleResult struct {
 	Booking     Booking
 	SideEffects []string
 }
@@ -338,6 +351,89 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 	}, true, nil
 }
 
+func (s *Store) Confirm(ctx context.Context, requestID string, uid string, req ConfirmRequest) (LifecycleResult, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok, err := s.findLocked(ctx, requestID, uid)
+	if err != nil {
+		return LifecycleResult{}, false, err
+	}
+	if !ok {
+		return LifecycleResult{}, false, nil
+	}
+	if err := s.validator().ValidateConfirm(req); err != nil {
+		return LifecycleResult{}, false, err
+	}
+	if !confirmableStatus(existing.Status) {
+		return LifecycleResult{}, false, validationError(errCodeInvalidBookingStatus, "Booking is not confirmable")
+	}
+
+	confirmed := fixtureBooking(requestID, mergeBooking(existing, Booking{
+		Status:    "accepted",
+		UpdatedAt: "2026-01-01T00:15:00.000Z",
+	}))
+	plannedSideEffects, err := s.sideEffectPort().PlanBookingConfirmed(ctx, BookingConfirmedSideEffect{
+		Booking: sideEffectSnapshot(confirmed),
+	})
+	if err != nil {
+		return LifecycleResult{}, false, err
+	}
+	if s.repo != nil {
+		if err := s.repo.Save(ctx, confirmed); err != nil {
+			return LifecycleResult{}, false, err
+		}
+	}
+	s.bookings[uid] = confirmed
+
+	return LifecycleResult{
+		Booking:     confirmed,
+		SideEffects: sideEffectNames(plannedSideEffects),
+	}, true, nil
+}
+
+func (s *Store) Decline(ctx context.Context, requestID string, uid string, req DeclineRequest) (LifecycleResult, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok, err := s.findLocked(ctx, requestID, uid)
+	if err != nil {
+		return LifecycleResult{}, false, err
+	}
+	if !ok {
+		return LifecycleResult{}, false, nil
+	}
+	if err := s.validator().ValidateDecline(req); err != nil {
+		return LifecycleResult{}, false, err
+	}
+	if !confirmableStatus(existing.Status) {
+		return LifecycleResult{}, false, validationError(errCodeInvalidBookingStatus, "Booking is not declinable")
+	}
+
+	declined := fixtureBooking(requestID, mergeBooking(existing, Booking{
+		Status:    "rejected",
+		UpdatedAt: "2026-01-01T00:20:00.000Z",
+	}))
+	plannedSideEffects, err := s.sideEffectPort().PlanBookingDeclined(ctx, BookingDeclinedSideEffect{
+		Booking: sideEffectSnapshot(declined),
+		Reason:  req.Reason,
+	})
+	if err != nil {
+		return LifecycleResult{}, false, err
+	}
+	if s.repo != nil {
+		if err := s.repo.Save(ctx, declined); err != nil {
+			return LifecycleResult{}, false, err
+		}
+	}
+	s.bookings[uid] = declined
+
+	return LifecycleResult{
+		Booking:     declined,
+		SideEffects: sideEffectNames(plannedSideEffects),
+	}, true, nil
+}
+
 func fixtureBooking(requestID string, overrides Booking) Booking {
 	base := Booking{
 		UID:         PrimaryFixtureUID,
@@ -369,6 +465,26 @@ func fixtureBooking(requestID string, overrides Booking) Booking {
 	return mergeBooking(base, overrides)
 }
 
+func pendingFixtureBooking(requestID string, uid string) Booking {
+	return fixtureBooking(requestID, Booking{
+		UID:    uid,
+		ID:     pendingFixtureID(uid),
+		Status: "pending",
+		Start:  "2026-05-03T15:00:00.000Z",
+		End:    "2026-05-03T15:30:00.000Z",
+		Metadata: map[string]any{
+			"fixture": "pending-host-action",
+		},
+	})
+}
+
+func pendingFixtureID(uid string) int {
+	if uid == PendingDeclineFixtureUID {
+		return 989
+	}
+	return 988
+}
+
 func endForStart(start string) (string, error) {
 	parsed, err := time.Parse(time.RFC3339Nano, start)
 	if err != nil {
@@ -384,6 +500,10 @@ func bookingTimeZone(booking Booking) string {
 		}
 	}
 	return FixtureTimeZone
+}
+
+func confirmableStatus(status string) bool {
+	return status == "pending" || status == "awaiting_host"
 }
 
 func mergeBooking(base Booking, overrides Booking) Booking {
@@ -446,11 +566,15 @@ func (s *Store) findLocked(ctx context.Context, requestID string, uid string) (B
 		}
 	}
 
-	if uid != PrimaryFixtureUID {
+	var created Booking
+	switch uid {
+	case PrimaryFixtureUID:
+		created = fixtureBooking(requestID, Booking{})
+	case PendingConfirmFixtureUID, PendingDeclineFixtureUID:
+		created = pendingFixtureBooking(requestID, uid)
+	default:
 		return Booking{}, false, nil
 	}
-
-	created := fixtureBooking(requestID, Booking{})
 	if s.repo != nil {
 		if err := s.repo.SaveCreated(ctx, created, ""); err != nil {
 			return Booking{}, false, err

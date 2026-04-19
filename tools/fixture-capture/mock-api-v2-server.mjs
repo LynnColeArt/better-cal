@@ -122,6 +122,24 @@ export function createMockApiV2Server() {
     }
     return bookings.get("mock-booking-personal-basic");
   };
+  const ensurePendingBooking = (uid) => {
+    if (!bookings.has(uid)) {
+      bookings.set(
+        uid,
+        bookingPayload({
+          uid,
+          id: uid === "mock-booking-pending-decline" ? 989 : 988,
+          status: "pending",
+          start: "2026-05-03T15:00:00.000Z",
+          end: "2026-05-03T15:30:00.000Z",
+          metadata: {
+            fixture: "pending-host-action",
+          },
+        })
+      );
+    }
+    return bookings.get(uid);
+  };
 
   return http.createServer(async (req, res) => {
     const path = routePath(req);
@@ -347,6 +365,64 @@ export function createMockApiV2Server() {
           newBookingUid: newBooking.uid,
         },
         sideEffects: ["calendar.rescheduled", "email.rescheduled", "webhook.booking.rescheduled"],
+      });
+      return;
+    }
+
+    const bookingConfirm = path.match(/^\/v2\/bookings\/([^/]+)\/confirm$/);
+    if (req.method === "POST" && bookingConfirm) {
+      if (!authorized(req)) {
+        sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
+        return;
+      }
+
+      await readJsonBody(req);
+      const uid = decodeURIComponent(bookingConfirm[1]);
+      const existing = uid === "mock-booking-pending-confirm" ? ensurePendingBooking(uid) : bookings.get(uid);
+      if (!existing) {
+        sendJson(res, 404, { status: "error", error: { code: "NOT_FOUND", requestId: "mock-request-id" } });
+        return;
+      }
+
+      const confirmed = bookingPayload({
+        ...existing,
+        status: "accepted",
+        updatedAt: "2026-01-01T00:15:00.000Z",
+      });
+      bookings.set(uid, confirmed);
+      sendJson(res, 200, {
+        status: "success",
+        data: confirmed,
+        sideEffects: ["email.confirmed", "webhook.booking.confirmed"],
+      });
+      return;
+    }
+
+    const bookingDecline = path.match(/^\/v2\/bookings\/([^/]+)\/decline$/);
+    if (req.method === "POST" && bookingDecline) {
+      if (!authorized(req)) {
+        sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
+        return;
+      }
+
+      await readJsonBody(req);
+      const uid = decodeURIComponent(bookingDecline[1]);
+      const existing = uid === "mock-booking-pending-decline" ? ensurePendingBooking(uid) : bookings.get(uid);
+      if (!existing) {
+        sendJson(res, 404, { status: "error", error: { code: "NOT_FOUND", requestId: "mock-request-id" } });
+        return;
+      }
+
+      const declined = bookingPayload({
+        ...existing,
+        status: "rejected",
+        updatedAt: "2026-01-01T00:20:00.000Z",
+      });
+      bookings.set(uid, declined);
+      sendJson(res, 200, {
+        status: "success",
+        data: declined,
+        sideEffects: ["email.declined", "webhook.booking.declined"],
       });
       return;
     }

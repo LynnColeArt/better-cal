@@ -13,6 +13,7 @@ const (
 	errCodeInvalidEventType     = "INVALID_EVENT_TYPE"
 	errCodeInvalidStartTime     = "INVALID_START_TIME"
 	errCodeInvalidTimeZone      = "INVALID_TIME_ZONE"
+	errCodeInvalidBookingStatus = "INVALID_BOOKING_STATUS"
 	errCodeSecretField          = "SECRET_FIELD_NOT_ALLOWED"
 	errCodeSlotUnavailable      = "SLOT_UNAVAILABLE"
 )
@@ -21,6 +22,8 @@ type BookingValidator interface {
 	ValidateCreate(CreateRequest) error
 	ValidateCancel(CancelRequest) error
 	ValidateReschedule(RescheduleRequest) error
+	ValidateConfirm(ConfirmRequest) error
+	ValidateDecline(DeclineRequest) error
 }
 
 type DefaultValidator struct{}
@@ -64,6 +67,14 @@ func (DefaultValidator) ValidateCancel(CancelRequest) error {
 
 func (DefaultValidator) ValidateReschedule(req RescheduleRequest) error {
 	return validateTimestamp(req.Start, errCodeInvalidStartTime)
+}
+
+func (DefaultValidator) ValidateConfirm(ConfirmRequest) error {
+	return nil
+}
+
+func (DefaultValidator) ValidateDecline(DeclineRequest) error {
+	return nil
 }
 
 func validateAttendee(attendee Attendee) error {

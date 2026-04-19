@@ -157,7 +157,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.host-action",
       "schemaRefs": ["schema.api-v2.booking.confirm.response"],
-      "fixtureRefs": []
+      "fixtureRefs": ["booking.confirm.host"]
     },
     {
       "id": "api-v2.bookings.decline",
@@ -170,7 +170,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.host-action",
       "schemaRefs": ["schema.api-v2.booking.decline.request", "schema.api-v2.booking.decline.response"],
-      "fixtureRefs": []
+      "fixtureRefs": ["booking.decline.host"]
     }
   ]
 }

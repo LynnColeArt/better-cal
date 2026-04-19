@@ -194,6 +194,8 @@ try {
   assertCaptured(outputRoot, "booking-lifecycle", "booking.read.by-uid", 200);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.cancel.owner", 200);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.reschedule.owner", 200);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.confirm.host", 200);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.decline.host", 200);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.unauthorized-user-denied", 403);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.secret-field-denied", 400);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.unavailable-slot-denied", 400);

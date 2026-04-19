@@ -77,6 +77,67 @@ func TestReschedulePlansSideEffectsThroughPort(t *testing.T) {
 	assertSideEffectSnapshotIsSecretFree(t, call.NewBooking)
 }
 
+func TestConfirmPlansSideEffectsThroughPort(t *testing.T) {
+	port := &capturingSideEffectPort{}
+	store := NewStore(WithSideEffectPort(port))
+
+	result, ok, err := store.Confirm(context.Background(), "confirm-request", PendingConfirmFixtureUID, ConfirmRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("booking was not confirmed")
+	}
+	assertStringSlice(t, result.SideEffects, []string{
+		string(SideEffectEmailConfirmed),
+		string(SideEffectWebhookBookingConfirmed),
+	})
+	if len(port.confirmed) != 1 {
+		t.Fatalf("confirm side-effect calls = %d", len(port.confirmed))
+	}
+	call := port.confirmed[0]
+	if call.Booking.UID != PendingConfirmFixtureUID {
+		t.Fatalf("booking uid = %q", call.Booking.UID)
+	}
+	if call.Booking.Status != "accepted" {
+		t.Fatalf("booking status = %q", call.Booking.Status)
+	}
+	assertSideEffectSnapshotIsSecretFree(t, call.Booking)
+}
+
+func TestDeclinePlansSideEffectsThroughPort(t *testing.T) {
+	port := &capturingSideEffectPort{}
+	store := NewStore(WithSideEffectPort(port))
+
+	result, ok, err := store.Decline(context.Background(), "decline-request", PendingDeclineFixtureUID, DeclineRequest{
+		Reason: "Fixture decline",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("booking was not declined")
+	}
+	assertStringSlice(t, result.SideEffects, []string{
+		string(SideEffectEmailDeclined),
+		string(SideEffectWebhookBookingDeclined),
+	})
+	if len(port.declined) != 1 {
+		t.Fatalf("decline side-effect calls = %d", len(port.declined))
+	}
+	call := port.declined[0]
+	if call.Booking.UID != PendingDeclineFixtureUID {
+		t.Fatalf("booking uid = %q", call.Booking.UID)
+	}
+	if call.Booking.Status != "rejected" {
+		t.Fatalf("booking status = %q", call.Booking.Status)
+	}
+	if call.Reason != "Fixture decline" {
+		t.Fatalf("decline reason = %q", call.Reason)
+	}
+	assertSideEffectSnapshotIsSecretFree(t, call.Booking)
+}
+
 func TestSideEffectPlanningFailurePreventsStateTransition(t *testing.T) {
 	port := &capturingSideEffectPort{err: errors.New("side-effect planner unavailable")}
 	store := NewStore(WithSideEffectPort(port))
@@ -121,6 +182,8 @@ func assertSideEffectSnapshotIsSecretFree(t *testing.T, snapshot BookingSideEffe
 type capturingSideEffectPort struct {
 	cancelled   []BookingCancelledSideEffect
 	rescheduled []BookingRescheduledSideEffect
+	confirmed   []BookingConfirmedSideEffect
+	declined    []BookingDeclinedSideEffect
 	err         error
 }
 
@@ -145,5 +208,27 @@ func (p *capturingSideEffectPort) PlanBookingRescheduled(_ context.Context, even
 		{Name: SideEffectCalendarRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
 		{Name: SideEffectEmailRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
 		{Name: SideEffectWebhookBookingRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
+	}, nil
+}
+
+func (p *capturingSideEffectPort) PlanBookingConfirmed(_ context.Context, event BookingConfirmedSideEffect) ([]PlannedSideEffect, error) {
+	p.confirmed = append(p.confirmed, event)
+	if p.err != nil {
+		return nil, p.err
+	}
+	return []PlannedSideEffect{
+		{Name: SideEffectEmailConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectWebhookBookingConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+	}, nil
+}
+
+func (p *capturingSideEffectPort) PlanBookingDeclined(_ context.Context, event BookingDeclinedSideEffect) ([]PlannedSideEffect, error) {
+	p.declined = append(p.declined, event)
+	if p.err != nil {
+		return nil, p.err
+	}
+	return []PlannedSideEffect{
+		{Name: SideEffectEmailDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectWebhookBookingDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
 	}, nil
 }
