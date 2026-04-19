@@ -61,7 +61,10 @@ func main() {
 			slog.Error("slot availability seed failed", "error", err)
 			os.Exit(1)
 		}
-		slotService = slots.NewService(slots.WithRepository(slotRepository))
+		slotService = slots.NewService(
+			slots.WithRepository(slotRepository),
+			slots.WithBusyTimeProvider(slotRepository),
+		)
 		serverOptions = append(serverOptions, httpapi.WithAuthService(
 			auth.NewService(
 				cfg,

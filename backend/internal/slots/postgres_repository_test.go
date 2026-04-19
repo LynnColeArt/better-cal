@@ -89,6 +89,85 @@ func TestPostgresRepositoryPersistsAvailabilitySlots(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositoryFiltersAcceptedBookingBusyTimes(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	eventTypeID := 300000 + int(time.Now().UnixNano()%100000)
+	bookingUID := "busy-slot-booking-" + time.Now().Format("20060102150405.000000000")
+	slotTime := "2026-07-01T15:00:00.000Z"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, bookingUID)
+		_, _ = pool.Exec(cleanupCtx, `delete from event_types where event_type_id = $1`, eventTypeID)
+	})
+
+	repo := NewPostgresRepository(pool)
+	if err := repo.SaveEventType(ctx, EventType{
+		ID:       eventTypeID,
+		Title:    "Busy Time Fixture",
+		Duration: 30,
+		TimeZone: FixtureTimeZone,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveAvailabilitySlot(ctx, AvailabilitySlot{
+		EventTypeID: eventTypeID,
+		Time:        slotTime,
+		Duration:    30,
+		TimeZone:    FixtureTimeZone,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	insertAcceptedBooking(t, ctx, pool, bookingUID, eventTypeID, slotTime, "2026-07-01T15:30:00.000Z")
+
+	service := NewService(WithRepository(repo), WithBusyTimeProvider(repo))
+	result, ok, err := service.ReadAvailable(ctx, "busy-slot-request", Request{
+		EventTypeID: eventTypeID,
+		Start:       "2026-07-01T00:00:00.000Z",
+		End:         "2026-07-02T00:00:00.000Z",
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("repository event type was not found")
+	}
+	if len(result.Slots) != 0 {
+		t.Fatalf("slots = %#v, want accepted booking to block persisted slot", result.Slots)
+	}
+
+	available, err := service.IsAvailable(ctx, "busy-slot-request", AvailabilityRequest{
+		EventTypeID: eventTypeID,
+		Start:       slotTime,
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if available {
+		t.Fatal("accepted booking did not block booking availability")
+	}
+
+	if _, err := pool.Exec(ctx, `update bookings set status = 'cancelled' where uid = $1`, bookingUID); err != nil {
+		t.Fatal(err)
+	}
+	available, err = service.IsAvailable(ctx, "busy-slot-request", AvailabilityRequest{
+		EventTypeID: eventTypeID,
+		Start:       slotTime,
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available {
+		t.Fatal("cancelled booking still blocked booking availability")
+	}
+}
+
 func TestSeedFixtureAvailabilityIsReadable(t *testing.T) {
 	pool := testPostgresRepositoryPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -154,4 +233,27 @@ func testPostgresRepositoryPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	return pool
+}
+
+func insertAcceptedBooking(t *testing.T, ctx context.Context, pool *pgxpool.Pool, uid string, eventTypeID int, start string, end string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		insert into bookings (
+			uid,
+			booking_id,
+			title,
+			status,
+			start_time,
+			end_time,
+			event_type_id,
+			responses,
+			metadata,
+			created_at_wire,
+			updated_at_wire,
+			request_id
+		)
+		values ($1, 987654, 'Busy Time Fixture', 'accepted', $2, $3, $4, '{}', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'busy-time-test')
+	`, uid, start, end, eventTypeID); err != nil {
+		t.Fatal(err)
+	}
 }

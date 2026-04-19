@@ -77,6 +77,44 @@ func (r *PostgresRepository) ReadAvailable(ctx context.Context, requestID string
 	}, true, nil
 }
 
+func (r *PostgresRepository) BusyTimes(ctx context.Context, req Request) ([]BusyTime, error) {
+	startAt, err := time.Parse(time.RFC3339Nano, req.Start)
+	if err != nil {
+		return nil, fmt.Errorf("parse busy start boundary: %w", err)
+	}
+	endAt, err := time.Parse(time.RFC3339Nano, req.End)
+	if err != nil {
+		return nil, fmt.Errorf("parse busy end boundary: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		select start_time, end_time
+		from bookings
+		where event_type_id = $1
+			and status = 'accepted'
+			and start_time::timestamptz < $3
+			and end_time::timestamptz > $2
+		order by start_time::timestamptz
+	`, req.EventTypeID, startAt, endAt)
+	if err != nil {
+		return nil, fmt.Errorf("read internal busy times: %w", err)
+	}
+	defer rows.Close()
+
+	busyTimes := []BusyTime{}
+	for rows.Next() {
+		var busyTime BusyTime
+		if err := rows.Scan(&busyTime.Start, &busyTime.End); err != nil {
+			return nil, fmt.Errorf("scan internal busy time: %w", err)
+		}
+		busyTimes = append(busyTimes, busyTime)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read internal busy time rows: %w", err)
+	}
+	return busyTimes, nil
+}
+
 func (r *PostgresRepository) SaveEventType(ctx context.Context, eventType EventType) error {
 	_, err := r.pool.Exec(ctx, `
 		insert into event_types (event_type_id, title, duration_minutes, time_zone, updated_at)

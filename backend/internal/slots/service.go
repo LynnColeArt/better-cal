@@ -24,6 +24,10 @@ type Repository interface {
 	SaveAvailabilitySlot(context.Context, AvailabilitySlot) error
 }
 
+type BusyTimeProvider interface {
+	BusyTimes(context.Context, Request) ([]BusyTime, error)
+}
+
 type Request struct {
 	EventTypeID int
 	Start       string
@@ -35,6 +39,11 @@ type AvailabilityRequest struct {
 	EventTypeID int
 	Start       string
 	TimeZone    string
+}
+
+type BusyTime struct {
+	Start string
+	End   string
 }
 
 type EventType struct {
@@ -66,7 +75,8 @@ type Slot struct {
 }
 
 type Service struct {
-	repo Repository
+	repo      Repository
+	busyTimes BusyTimeProvider
 }
 
 type ServiceOption func(*Service)
@@ -74,6 +84,12 @@ type ServiceOption func(*Service)
 func WithRepository(repo Repository) ServiceOption {
 	return func(s *Service) {
 		s.repo = repo
+	}
+}
+
+func WithBusyTimeProvider(provider BusyTimeProvider) ServiceOption {
+	return func(s *Service) {
+		s.busyTimes = provider
 	}
 }
 
@@ -128,12 +144,16 @@ func (s *Service) ReadAvailable(ctx context.Context, requestID string, req Reque
 	}
 	req = normalizedRequest(req)
 	if s.repo != nil {
-		return s.repo.ReadAvailable(ctx, requestID, req)
+		response, ok, err := s.repo.ReadAvailable(ctx, requestID, req)
+		if err != nil || !ok {
+			return response, ok, err
+		}
+		return s.filterBusySlots(ctx, req, response)
 	}
 	if req.EventTypeID != FixtureEventTypeID {
 		return Response{}, false, nil
 	}
-	return Response{
+	response := Response{
 		EventTypeID: req.EventTypeID,
 		TimeZone:    req.TimeZone,
 		Start:       req.Start,
@@ -144,7 +164,8 @@ func (s *Service) ReadAvailable(ctx context.Context, requestID string, req Reque
 			},
 		},
 		RequestID: requestID,
-	}, true, nil
+	}
+	return s.filterBusySlots(ctx, req, response)
 }
 
 func (r Response) HasSlot(start string) bool {
@@ -156,6 +177,56 @@ func (r Response) HasSlot(start string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Service) filterBusySlots(ctx context.Context, req Request, response Response) (Response, bool, error) {
+	if s.busyTimes == nil {
+		return response, true, nil
+	}
+	busyTimes, err := s.busyTimes.BusyTimes(ctx, req)
+	if err != nil {
+		return Response{}, false, err
+	}
+	if len(busyTimes) == 0 {
+		return response, true, nil
+	}
+	filtered := map[string][]Slot{}
+	for day, daySlots := range response.Slots {
+		for _, slot := range daySlots {
+			blocked, err := slotOverlapsBusyTime(slot, busyTimes)
+			if err != nil {
+				return Response{}, false, err
+			}
+			if blocked {
+				continue
+			}
+			filtered[day] = append(filtered[day], slot)
+		}
+	}
+	response.Slots = filtered
+	return response, true, nil
+}
+
+func slotOverlapsBusyTime(slot Slot, busyTimes []BusyTime) (bool, error) {
+	slotStart, err := time.Parse(time.RFC3339Nano, slot.Time)
+	if err != nil {
+		return false, fmt.Errorf("parse slot time: %w", err)
+	}
+	slotEnd := slotStart.Add(time.Duration(slot.Duration) * time.Minute)
+	for _, busyTime := range busyTimes {
+		busyStart, err := time.Parse(time.RFC3339Nano, busyTime.Start)
+		if err != nil {
+			return false, fmt.Errorf("parse busy start: %w", err)
+		}
+		busyEnd, err := time.Parse(time.RFC3339Nano, busyTime.End)
+		if err != nil {
+			return false, fmt.Errorf("parse busy end: %w", err)
+		}
+		if slotStart.Before(busyEnd) && busyStart.Before(slotEnd) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func FixtureEventType() EventType {

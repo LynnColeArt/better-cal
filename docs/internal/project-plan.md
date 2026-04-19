@@ -121,7 +121,7 @@ Deliverables:
 
 - schedule and availability services;
 - slot lookup by event type, time range, and timezone; the first `GET /v2/slots` canary is now captured and served by `backend/internal/slots/`, booking creation calls the same service through a validation-only availability adapter, and the Compose path now reads the fixture slot from `event_types` and `availability_slots`;
-- busy-time provider ports for internal bookings and external calendars;
+- busy-time provider ports for internal bookings and external calendars; the first internal-booking provider filters accepted `bookings` rows from slot reads and booking availability checks;
 - selected-calendar and destination-calendar handling;
 - timezone and DST test suite;
 - OOO, travel schedule, holiday, buffers, booking limits, duration limits, and seated-event support;
@@ -136,7 +136,7 @@ Exit criteria:
 
 - slot golden tests match legacy for representative scenarios;
 - performance is measured against existing heavy slot paths;
-- booking creation can call the Go slot engine in validation-only mode. The first slot-service adapter rejects unavailable create requests before persistence and can read the fixture slot from Postgres.
+- booking creation can call the Go slot engine in validation-only mode. The first slot-service adapter rejects unavailable create requests before persistence, can read the fixture slot from Postgres, and filters accepted internal bookings.
 
 ## Phase 5: Booking Write Path
 
