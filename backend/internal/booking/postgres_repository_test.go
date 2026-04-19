@@ -54,8 +54,15 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 		RequestID: "repo-test-request",
 	}
 
-	if err := repo.SaveCreated(ctx, bookingValue, idempotencyKey); err != nil {
+	persisted, duplicate, err := repo.SaveCreated(ctx, bookingValue, idempotencyKey, nil)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if duplicate {
+		t.Fatal("initial save reported duplicate")
+	}
+	if persisted.UID != uid {
+		t.Fatalf("persisted uid = %q", persisted.UID)
 	}
 
 	assertExplicitBookingRows(t, ctx, pool, uid, "accepted", 1)
@@ -103,10 +110,15 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 	}
 
 	bookingValue.Status = "cancelled"
-	if err := repo.Save(ctx, bookingValue); err != nil {
+	effects := []PlannedSideEffect{
+		{Name: SideEffectCalendarCancelled, BookingUID: uid, RequestID: "repo-test-request"},
+		{Name: SideEffectEmailCancelled, BookingUID: uid, RequestID: "repo-test-request"},
+	}
+	if err := repo.Save(ctx, effects, bookingValue); err != nil {
 		t.Fatal(err)
 	}
 	assertExplicitBookingRows(t, ctx, pool, uid, "cancelled", 1)
+	assertPlannedSideEffectRows(t, ctx, pool, uid, 2)
 	found, ok, err = repo.ReadByUID(ctx, uid)
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +129,81 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 	if found.Status != "cancelled" {
 		t.Fatalf("status = %q", found.Status)
 	}
+}
+
+func TestPostgresRepositoryReplaysIdempotencyConflictWithoutOverwriting(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	originalUID := fmt.Sprintf("repo-idempotent-original-%d", time.Now().UnixNano())
+	conflictingUID := originalUID + "-conflict"
+	idempotencyKey := originalUID + "-idempotency"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid in ($1, $2)`, originalUID, conflictingUID)
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid in ($1, $2)`, originalUID, conflictingUID)
+	})
+
+	original := repositoryTestBooking(originalUID, "original-request")
+	if _, duplicate, err := repo.SaveCreated(ctx, original, idempotencyKey, nil); err != nil {
+		t.Fatal(err)
+	} else if duplicate {
+		t.Fatal("initial save reported duplicate")
+	}
+
+	conflicting := repositoryTestBooking(conflictingUID, "conflicting-request")
+	conflicting.Status = "cancelled"
+	replayed, duplicate, err := repo.SaveCreated(ctx, conflicting, idempotencyKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !duplicate {
+		t.Fatal("conflicting idempotency key was not reported as duplicate")
+	}
+	if replayed.UID != originalUID {
+		t.Fatalf("replayed uid = %q, want %q", replayed.UID, originalUID)
+	}
+	if replayed.RequestID != "original-request" {
+		t.Fatalf("replayed request id = %q", replayed.RequestID)
+	}
+	assertBookingRowCount(t, ctx, pool, conflictingUID, 0)
+
+	found, ok, err := repo.ReadByUID(ctx, originalUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("original booking was not found")
+	}
+	if found.Status != "accepted" {
+		t.Fatalf("original status = %q", found.Status)
+	}
+}
+
+func TestPostgresRepositoryRollsBackBookingWhenSideEffectWriteFails(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	uid := fmt.Sprintf("repo-side-effect-rollback-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+	})
+
+	err := repo.Save(ctx, []PlannedSideEffect{
+		{Name: SideEffectEmailCancelled, BookingUID: "missing-side-effect-booking", RequestID: "rollback-request"},
+	}, repositoryTestBooking(uid, "rollback-request"))
+	if err == nil {
+		t.Fatal("expected side-effect persistence error")
+	}
+	assertBookingRowCount(t, ctx, pool, uid, 0)
 }
 
 func TestPostgresRepositoryFallsBackToFixturePayload(t *testing.T) {
@@ -184,6 +271,35 @@ func TestPostgresRepositoryFallsBackToFixturePayload(t *testing.T) {
 	}
 }
 
+func repositoryTestBooking(uid string, requestID string) Booking {
+	return Booking{
+		UID:         uid,
+		ID:          654,
+		Title:       "Repository Fixture",
+		Status:      "accepted",
+		Start:       "2026-05-03T15:00:00.000Z",
+		End:         "2026-05-03T15:30:00.000Z",
+		EventTypeID: 1001,
+		Attendees: []Attendee{
+			{
+				ID:       321,
+				Name:     "Fixture Attendee",
+				Email:    "fixture-attendee@example.test",
+				TimeZone: "America/Chicago",
+			},
+		},
+		Responses: map[string]any{
+			"email": "fixture-attendee@example.test",
+		},
+		Metadata: map[string]any{
+			"fixture": "postgres-repository",
+		},
+		CreatedAt: "2026-01-01T00:00:00.000Z",
+		UpdatedAt: "2026-01-01T00:00:00.000Z",
+		RequestID: requestID,
+	}
+}
+
 func TestPostgresRepositoryReturnsFalseForMissingRows(t *testing.T) {
 	pool := testPostgresRepositoryPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -241,5 +357,27 @@ func assertExplicitBookingRows(t *testing.T, ctx context.Context, pool *pgxpool.
 	}
 	if attendees != expectedAttendees {
 		t.Fatalf("attendee row count = %d, want %d", attendees, expectedAttendees)
+	}
+}
+
+func assertBookingRowCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, uid string, expected int) {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(ctx, `select count(*) from bookings where uid = $1`, uid).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != expected {
+		t.Fatalf("booking row count = %d, want %d", count, expected)
+	}
+}
+
+func assertPlannedSideEffectRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, uid string, expected int) {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(ctx, `select count(*) from booking_planned_side_effects where booking_uid = $1`, uid).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != expected {
+		t.Fatalf("planned side-effect row count = %d, want %d", count, expected)
 	}
 }

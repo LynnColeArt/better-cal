@@ -144,14 +144,14 @@ Goal: port create/cancel/reschedule/confirm/decline with all side effects.
 
 Deliverables:
 
-- booking aggregate service with transactional writes;
+- booking aggregate service with transactional writes; booking rows, idempotency keys, and planned side-effect records now commit together in the Postgres canary, and idempotency conflicts replay the first accepted booking;
 - attendee, guest, seat, recurring, no-show, reassignment, report, and internal-note behavior;
 - calendar event create/update/delete provider ports; cancel, reschedule, confirm, and decline now start with typed fixture side-effect planners;
 - conferencing creation and cleanup ports;
 - email enqueueing; cancel, reschedule, confirm, and decline now expose planned fixture email effects through the same port boundary;
 - webhook emission; cancel, reschedule, confirm, and decline now expose planned fixture webhook effects through the same port boundary;
 - payment state integration;
-- idempotency and retry semantics.
+- idempotency and retry semantics; the current Postgres repository rejects conflicting idempotency writes without overwriting the original booking.
 
 References:
 
@@ -162,7 +162,7 @@ Exit criteria:
 
 - golden booking state tests pass;
 - provider calls are mocked and asserted;
-- duplicate booking and retry tests pass;
+- duplicate booking and retry tests pass; the current Postgres canary includes idempotency conflict replay and rollback coverage for failed planned side-effect writes;
 - existing booking UI flows pass through the Next.js bridge.
 
 ## Phase 6: Integrations, Credentials, and App Store

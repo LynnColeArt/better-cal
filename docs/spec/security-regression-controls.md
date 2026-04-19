@@ -107,6 +107,8 @@ Booking:
 - booking read/write by a permissioned wrong owner;
 - booking confirm or decline by a permissioned non-host;
 - booking create duplicate idempotency key;
+- booking create duplicate idempotency conflict does not overwrite the first booking;
+- booking write rolls back if planned side-effect persistence fails;
 - booking cancel by unauthorized user;
 - booking reschedule by unauthorized user;
 - booking side-effect retry does not duplicate provider events, emails, webhooks, or payments.

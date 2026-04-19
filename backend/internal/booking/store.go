@@ -224,8 +224,16 @@ func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest)
 		Metadata:  metadata,
 	})
 	if s.repo != nil {
-		if err := s.repo.SaveCreated(ctx, created, req.IdempotencyKey); err != nil {
+		persisted, duplicate, err := s.repo.SaveCreated(ctx, created, req.IdempotencyKey, nil)
+		if err != nil {
 			return Booking{}, false, err
+		}
+		if duplicate {
+			s.bookings[persisted.UID] = persisted
+			if req.IdempotencyKey != "" {
+				s.idempotency[req.IdempotencyKey] = persisted.UID
+			}
+			return persisted, true, nil
 		}
 	}
 
@@ -271,7 +279,7 @@ func (s *Store) Cancel(ctx context.Context, requestID string, uid string, req Ca
 		return CancelResult{}, false, err
 	}
 	if s.repo != nil {
-		if err := s.repo.Save(ctx, cancelled); err != nil {
+		if err := s.repo.Save(ctx, plannedSideEffects, cancelled); err != nil {
 			return CancelResult{}, false, err
 		}
 	}
@@ -344,7 +352,7 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 	}
 
 	if s.repo != nil {
-		if err := s.repo.Save(ctx, oldBooking, newBooking); err != nil {
+		if err := s.repo.Save(ctx, plannedSideEffects, oldBooking, newBooking); err != nil {
 			return RescheduleResult{}, false, err
 		}
 	}
@@ -387,7 +395,7 @@ func (s *Store) Confirm(ctx context.Context, requestID string, uid string, req C
 		return LifecycleResult{}, false, err
 	}
 	if s.repo != nil {
-		if err := s.repo.Save(ctx, confirmed); err != nil {
+		if err := s.repo.Save(ctx, plannedSideEffects, confirmed); err != nil {
 			return LifecycleResult{}, false, err
 		}
 	}
@@ -429,7 +437,7 @@ func (s *Store) Decline(ctx context.Context, requestID string, uid string, req D
 		return LifecycleResult{}, false, err
 	}
 	if s.repo != nil {
-		if err := s.repo.Save(ctx, declined); err != nil {
+		if err := s.repo.Save(ctx, plannedSideEffects, declined); err != nil {
 			return LifecycleResult{}, false, err
 		}
 	}
@@ -591,7 +599,7 @@ func (s *Store) findLocked(ctx context.Context, requestID string, uid string) (B
 		return Booking{}, false, nil
 	}
 	if s.repo != nil {
-		if err := s.repo.SaveCreated(ctx, created, ""); err != nil {
+		if _, _, err := s.repo.SaveCreated(ctx, created, "", nil); err != nil {
 			return Booking{}, false, err
 		}
 	}

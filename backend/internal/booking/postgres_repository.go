@@ -14,8 +14,8 @@ import (
 type Repository interface {
 	ReadByUID(ctx context.Context, uid string) (Booking, bool, error)
 	ReadByIdempotencyKey(ctx context.Context, key string) (Booking, bool, error)
-	SaveCreated(ctx context.Context, booking Booking, idempotencyKey string) error
-	Save(ctx context.Context, bookings ...Booking) error
+	SaveCreated(ctx context.Context, booking Booking, idempotencyKey string, effects []PlannedSideEffect) (Booking, bool, error)
+	Save(ctx context.Context, effects []PlannedSideEffect, bookings ...Booking) error
 }
 
 type PostgresRepository struct {
@@ -134,9 +134,30 @@ func (r *PostgresRepository) readFixtureBooking(ctx context.Context, uid string)
 	return bookingValue, true, nil
 }
 
-func (r *PostgresRepository) SaveCreated(ctx context.Context, booking Booking, idempotencyKey string) error {
-	return db.WithTx(ctx, r.pool, func(tx db.Tx) error {
+func (r *PostgresRepository) SaveCreated(ctx context.Context, booking Booking, idempotencyKey string, effects []PlannedSideEffect) (Booking, bool, error) {
+	var duplicateUID string
+	if err := db.WithTx(ctx, r.pool, func(tx db.Tx) error {
+		if idempotencyKey != "" {
+			if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1))`, idempotencyKey); err != nil {
+				return fmt.Errorf("lock idempotency key: %w", err)
+			}
+			err := tx.QueryRow(ctx, `
+				select booking_uid
+				from booking_idempotency_keys
+				where idempotency_key = $1
+				for update
+			`, idempotencyKey).Scan(&duplicateUID)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("read locked idempotency booking uid: %w", err)
+			}
+		}
 		if err := saveBooking(ctx, tx, booking); err != nil {
+			return err
+		}
+		if err := savePlannedSideEffects(ctx, tx, effects); err != nil {
 			return err
 		}
 		if idempotencyKey == "" {
@@ -145,22 +166,34 @@ func (r *PostgresRepository) SaveCreated(ctx context.Context, booking Booking, i
 		if _, err := tx.Exec(ctx, `
 			insert into booking_idempotency_keys (idempotency_key, booking_uid)
 			values ($1, $2)
-			on conflict (idempotency_key) do nothing
 		`, idempotencyKey, booking.UID); err != nil {
 			return fmt.Errorf("save idempotency key: %w", err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return Booking{}, false, err
+	}
+	if duplicateUID == "" {
+		return booking, false, nil
+	}
+	duplicate, ok, err := r.ReadByUID(ctx, duplicateUID)
+	if err != nil {
+		return Booking{}, false, err
+	}
+	if !ok {
+		return Booking{}, false, fmt.Errorf("read duplicate idempotency booking %q: not found", duplicateUID)
+	}
+	return duplicate, true, nil
 }
 
-func (r *PostgresRepository) Save(ctx context.Context, bookings ...Booking) error {
+func (r *PostgresRepository) Save(ctx context.Context, effects []PlannedSideEffect, bookings ...Booking) error {
 	return db.WithTx(ctx, r.pool, func(tx db.Tx) error {
 		for _, bookingValue := range bookings {
 			if err := saveBooking(ctx, tx, bookingValue); err != nil {
 				return err
 			}
 		}
-		return nil
+		return savePlannedSideEffects(ctx, tx, effects)
 	})
 }
 
@@ -240,6 +273,22 @@ func saveFixtureBooking(ctx context.Context, tx db.Tx, booking Booking) error {
 			updated_at = now()
 	`, booking.UID, string(raw)); err != nil {
 		return fmt.Errorf("save booking fixture: %w", err)
+	}
+	return nil
+}
+
+func savePlannedSideEffects(ctx context.Context, tx db.Tx, effects []PlannedSideEffect) error {
+	for _, effect := range effects {
+		if effect.Name == "" || effect.BookingUID == "" || effect.RequestID == "" {
+			return fmt.Errorf("invalid planned side effect")
+		}
+		if _, err := tx.Exec(ctx, `
+			insert into booking_planned_side_effects (booking_uid, name, request_id)
+			values ($1, $2, $3)
+			on conflict (booking_uid, name, request_id) do nothing
+		`, effect.BookingUID, string(effect.Name), effect.RequestID); err != nil {
+			return fmt.Errorf("save planned side effect: %w", err)
+		}
 	}
 	return nil
 }

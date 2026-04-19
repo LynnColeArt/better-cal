@@ -309,6 +309,7 @@ func TestLifecycleMethodsReturnFalseForMissingBookings(t *testing.T) {
 type fakeRepository struct {
 	byUID         map[string]Booking
 	byIdempotency map[string]Booking
+	sideEffects   []PlannedSideEffect
 }
 
 func (f *fakeRepository) ReadByUID(_ context.Context, uid string) (Booking, bool, error) {
@@ -321,27 +322,34 @@ func (f *fakeRepository) ReadByIdempotencyKey(_ context.Context, key string) (Bo
 	return bookingValue, ok, nil
 }
 
-func (f *fakeRepository) SaveCreated(_ context.Context, bookingValue Booking, idempotencyKey string) error {
+func (f *fakeRepository) SaveCreated(_ context.Context, bookingValue Booking, idempotencyKey string, effects []PlannedSideEffect) (Booking, bool, error) {
+	if idempotencyKey != "" {
+		if existing, ok := f.byIdempotency[idempotencyKey]; ok {
+			return existing, true, nil
+		}
+	}
 	if f.byUID == nil {
 		f.byUID = make(map[string]Booking)
 	}
 	f.byUID[bookingValue.UID] = bookingValue
+	f.sideEffects = append(f.sideEffects, effects...)
 	if idempotencyKey == "" {
-		return nil
+		return bookingValue, false, nil
 	}
 	if f.byIdempotency == nil {
 		f.byIdempotency = make(map[string]Booking)
 	}
 	f.byIdempotency[idempotencyKey] = bookingValue
-	return nil
+	return bookingValue, false, nil
 }
 
-func (f *fakeRepository) Save(_ context.Context, bookings ...Booking) error {
+func (f *fakeRepository) Save(_ context.Context, effects []PlannedSideEffect, bookings ...Booking) error {
 	if f.byUID == nil {
 		f.byUID = make(map[string]Booking)
 	}
 	for _, bookingValue := range bookings {
 		f.byUID[bookingValue.UID] = bookingValue
 	}
+	f.sideEffects = append(f.sideEffects, effects...)
 	return nil
 }
