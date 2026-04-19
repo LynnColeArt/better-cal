@@ -28,6 +28,71 @@ func TestReadAvailableReturnsFixtureSlots(t *testing.T) {
 	}
 }
 
+func TestIsAvailableMatchesFixtureSlot(t *testing.T) {
+	service := NewService()
+
+	available, err := service.IsAvailable(context.Background(), "slot-request", AvailabilityRequest{
+		EventTypeID: FixtureEventTypeID,
+		Start:       FixtureSlotTime,
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available {
+		t.Fatal("fixture slot was not available")
+	}
+}
+
+func TestIsAvailableRejectsMissingSlot(t *testing.T) {
+	service := NewService()
+
+	available, err := service.IsAvailable(context.Background(), "slot-request", AvailabilityRequest{
+		EventTypeID: FixtureEventTypeID,
+		Start:       "2026-05-01T16:00:00.000Z",
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if available {
+		t.Fatal("missing fixture slot was available")
+	}
+}
+
+func TestIsAvailableReturnsFalseForUnknownEventType(t *testing.T) {
+	service := NewService()
+
+	available, err := service.IsAvailable(context.Background(), "slot-request", AvailabilityRequest{
+		EventTypeID: 9999,
+		Start:       FixtureSlotTime,
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if available {
+		t.Fatal("unknown event type returned available")
+	}
+}
+
+func TestIsAvailableRequiresStart(t *testing.T) {
+	service := NewService()
+
+	_, err := service.IsAvailable(context.Background(), "slot-request", AvailabilityRequest{
+		EventTypeID: FixtureEventTypeID,
+		TimeZone:    FixtureTimeZone,
+	})
+
+	validationErr, ok := ValidationFromError(err)
+	if !ok {
+		t.Fatalf("error = %v, want validation error", err)
+	}
+	if validationErr.Code != "INVALID_START_TIME" {
+		t.Fatalf("validation code = %q", validationErr.Code)
+	}
+}
+
 func TestReadAvailableReturnsFalseForUnknownEventType(t *testing.T) {
 	service := NewService()
 

@@ -4,7 +4,39 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
+
+func TestSlotServiceAvailabilityPortCallsSlotService(t *testing.T) {
+	service := &capturingSlotService{available: true}
+	port := NewSlotServiceAvailabilityPort(service)
+
+	available, err := port.IsSlotAvailable(context.Background(), SlotAvailabilityRequest{
+		RequestID:   "slot-port-request",
+		EventTypeID: FixtureEventTypeID,
+		Start:       FixtureBookingStart,
+		TimeZone:    FixtureTimeZone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available {
+		t.Fatal("slot service availability port returned unavailable")
+	}
+	if service.requestID != "slot-port-request" {
+		t.Fatalf("request id = %q", service.requestID)
+	}
+	if service.request.EventTypeID != FixtureEventTypeID {
+		t.Fatalf("event type id = %d", service.request.EventTypeID)
+	}
+	if service.request.Start != FixtureBookingStart {
+		t.Fatalf("start = %q", service.request.Start)
+	}
+	if service.request.TimeZone != FixtureTimeZone {
+		t.Fatalf("time zone = %q", service.request.TimeZone)
+	}
+}
 
 func TestCreateChecksSlotAvailabilityAfterDefaults(t *testing.T) {
 	port := &capturingAvailabilityPort{available: true}
@@ -24,6 +56,9 @@ func TestCreateChecksSlotAvailabilityAfterDefaults(t *testing.T) {
 		t.Fatalf("availability checks = %d", len(port.requests))
 	}
 	request := port.requests[0]
+	if request.RequestID != "request-id" {
+		t.Fatalf("request id = %q", request.RequestID)
+	}
 	if request.EventTypeID != FixtureEventTypeID {
 		t.Fatalf("event type id = %d", request.EventTypeID)
 	}
@@ -105,4 +140,20 @@ func (p *capturingAvailabilityPort) IsSlotAvailable(_ context.Context, req SlotA
 		return false, p.err
 	}
 	return p.available, nil
+}
+
+type capturingSlotService struct {
+	requestID string
+	request   slots.AvailabilityRequest
+	available bool
+	err       error
+}
+
+func (s *capturingSlotService) IsAvailable(_ context.Context, requestID string, req slots.AvailabilityRequest) (bool, error) {
+	s.requestID = requestID
+	s.request = req
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.available, nil
 }

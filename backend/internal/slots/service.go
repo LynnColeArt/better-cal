@@ -22,6 +22,12 @@ type Request struct {
 	TimeZone    string
 }
 
+type AvailabilityRequest struct {
+	EventTypeID int
+	Start       string
+	TimeZone    string
+}
+
 type Response struct {
 	EventTypeID int               `json:"eventTypeId"`
 	TimeZone    string            `json:"timeZone"`
@@ -59,6 +65,21 @@ func NewService() *Service {
 	return &Service{}
 }
 
+func (s *Service) IsAvailable(ctx context.Context, requestID string, req AvailabilityRequest) (bool, error) {
+	if req.Start == "" {
+		return false, validationError("INVALID_START_TIME", "Start time is required")
+	}
+	response, ok, err := s.ReadAvailable(ctx, requestID, Request{
+		EventTypeID: req.EventTypeID,
+		Start:       req.Start,
+		TimeZone:    req.TimeZone,
+	})
+	if err != nil || !ok {
+		return false, err
+	}
+	return response.HasSlot(req.Start), nil
+}
+
 func (s *Service) ReadAvailable(_ context.Context, requestID string, req Request) (Response, bool, error) {
 	if err := validateRequest(req); err != nil {
 		return Response{}, false, err
@@ -90,6 +111,17 @@ func (s *Service) ReadAvailable(_ context.Context, requestID string, req Request
 		},
 		RequestID: requestID,
 	}, true, nil
+}
+
+func (r Response) HasSlot(start string) bool {
+	for _, daySlots := range r.Slots {
+		for _, slot := range daySlots {
+			if slot.Time == start {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func validateRequest(req Request) error {

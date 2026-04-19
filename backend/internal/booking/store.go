@@ -3,15 +3,17 @@ package booking
 import (
 	"context"
 	"sync"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
 
 const (
 	PrimaryFixtureUID     = "mock-booking-personal-basic"
 	RescheduledFixtureUID = "mock-booking-rescheduled"
-	FixtureEventTypeID    = 1001
-	FixtureBookingStart   = "2026-05-01T15:00:00.000Z"
+	FixtureEventTypeID    = slots.FixtureEventTypeID
+	FixtureBookingStart   = slots.FixtureSlotTime
 	FixtureBookingEnd     = "2026-05-01T15:30:00.000Z"
-	FixtureTimeZone       = "America/Chicago"
+	FixtureTimeZone       = slots.FixtureTimeZone
 )
 
 type Attendee struct {
@@ -103,7 +105,7 @@ func WithSlotAvailabilityPort(port SlotAvailabilityPort) StoreOption {
 func NewStore(opts ...StoreOption) *Store {
 	store := &Store{
 		bookingValidator: DefaultValidator{},
-		slotAvailability: FixtureSlotAvailabilityPort{},
+		slotAvailability: NewSlotServiceAvailabilityPort(slots.NewService()),
 		sideEffects:      FixtureSideEffectPort{},
 		bookings:         make(map[string]Booking),
 		idempotency:      make(map[string]string),
@@ -114,8 +116,8 @@ func NewStore(opts ...StoreOption) *Store {
 	return store
 }
 
-func NewStoreWithRepository(repo Repository) *Store {
-	return NewStore(WithRepository(repo))
+func NewStoreWithRepository(repo Repository, opts ...StoreOption) *Store {
+	return NewStore(append([]StoreOption{WithRepository(repo)}, opts...)...)
 }
 
 func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest) (Booking, bool, error) {
@@ -167,6 +169,7 @@ func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest)
 		eventTypeID = FixtureEventTypeID
 	}
 	available, err := s.availabilityPort().IsSlotAvailable(ctx, SlotAvailabilityRequest{
+		RequestID:   requestID,
 		EventTypeID: eventTypeID,
 		Start:       start,
 		TimeZone:    attendeeValue.TimeZone,
@@ -423,7 +426,7 @@ func (s *Store) availabilityPort() SlotAvailabilityPort {
 	if s.slotAvailability != nil {
 		return s.slotAvailability
 	}
-	return FixtureSlotAvailabilityPort{}
+	return NewSlotServiceAvailabilityPort(slots.NewService())
 }
 
 func (s *Store) sideEffectPort() SideEffectPort {

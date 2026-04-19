@@ -64,16 +64,24 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger, opts ...Option)
 		logger = slog.Default()
 	}
 	server := &Server{
-		cfg:          cfg,
-		authService:  auth.NewService(cfg),
-		authorizer:   authz.NewAuthorizer(),
-		bookingStore: booking.NewStore(),
-		slotService:  slots.NewService(),
-		logger:       logger,
-		mux:          http.NewServeMux(),
+		cfg:        cfg,
+		authorizer: authz.NewAuthorizer(),
+		logger:     logger,
+		mux:        http.NewServeMux(),
 	}
 	for _, opt := range opts {
 		opt(server)
+	}
+	if server.authService == nil {
+		server.authService = auth.NewService(cfg)
+	}
+	if server.slotService == nil {
+		server.slotService = slots.NewService()
+	}
+	if server.bookingStore == nil {
+		server.bookingStore = booking.NewStore(
+			booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(server.slotService)),
+		)
 	}
 	server.routes()
 	return server
@@ -178,7 +186,9 @@ func (s *Server) bookings() *booking.Store {
 	if s.bookingStore != nil {
 		return s.bookingStore
 	}
-	s.bookingStore = booking.NewStore()
+	s.bookingStore = booking.NewStore(
+		booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(s.slots())),
+	)
 	return s.bookingStore
 }
 

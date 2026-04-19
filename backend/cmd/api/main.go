@@ -13,11 +13,13 @@ import (
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/LynnColeArt/better-cal/backend/internal/httpapi"
+	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
 
 func main() {
 	cfg := config.FromEnv()
-	serverOptions := []httpapi.Option{}
+	slotService := slots.NewService()
+	serverOptions := []httpapi.Option{httpapi.WithSlotService(slotService)}
 	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		pool, err := db.Open(ctx, cfg.DatabaseURL)
@@ -62,7 +64,10 @@ func main() {
 			),
 		))
 		serverOptions = append(serverOptions, httpapi.WithBookingStore(
-			booking.NewStoreWithRepository(booking.NewPostgresRepository(pool)),
+			booking.NewStoreWithRepository(
+				booking.NewPostgresRepository(pool),
+				booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(slotService)),
+			),
 		))
 		cancel()
 		slog.Info("database connection ready")

@@ -6,6 +6,7 @@ The first implementation slice is deliberately small and fixture-driven. It supp
 
 - `GET /health`
 - `GET /v2/me`
+- `GET /v2/slots`
 - `GET /v2/auth/oauth2/clients/{clientId}`
 - `GET /v2/oauth-clients/{clientId}`
 - `POST /v2/bookings`
@@ -13,7 +14,7 @@ The first implementation slice is deliberately small and fixture-driven. It supp
 - `POST /v2/bookings/{bookingUid}/cancel`
 - `POST /v2/bookings/{bookingUid}/reschedule`
 
-The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, and a booking service for the current accepted lifecycle fixtures. When `CALDIY_DATABASE_URL` is set, API-key principal lookup, OAuth client metadata lookup, platform client verification, explicit booking rows, booking fixture fallback state, and idempotency keys are stored in Postgres through repository adapters; otherwise the service falls back to config and in-memory fixture state.
+The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, a slot service for the current accepted availability fixture, and a booking service for the current accepted lifecycle fixtures. Booking creation calls the slot service through an availability adapter before persistence so unavailable fixture slots are rejected by the same service boundary that backs `GET /v2/slots`. When `CALDIY_DATABASE_URL` is set, API-key principal lookup, OAuth client metadata lookup, platform client verification, explicit booking rows, booking fixture fallback state, and idempotency keys are stored in Postgres through repository adapters; otherwise the service falls back to config and in-memory fixture state.
 
 Run locally:
 
