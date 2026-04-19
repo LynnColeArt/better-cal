@@ -13,6 +13,7 @@ const (
 	RescheduledFixtureUID    = "mock-booking-rescheduled"
 	PendingConfirmFixtureUID = "mock-booking-pending-confirm"
 	PendingDeclineFixtureUID = "mock-booking-pending-decline"
+	FixtureOwnerUserID       = 123
 	FixtureEventTypeID       = slots.FixtureEventTypeID
 	FixtureBookingStart      = slots.FixtureSlotTime
 	FixtureBookingEnd        = "2026-05-01T15:30:00.000Z"
@@ -40,6 +41,8 @@ type Booking struct {
 	CreatedAt   string         `json:"createdAt"`
 	UpdatedAt   string         `json:"updatedAt"`
 	RequestID   string         `json:"requestId"`
+	OwnerUserID int            `json:"-"`
+	HostUserIDs []int          `json:"-"`
 }
 
 type CreateRequest struct {
@@ -49,6 +52,8 @@ type CreateRequest struct {
 	Responses      map[string]any `json:"responses"`
 	Metadata       map[string]any `json:"metadata"`
 	IdempotencyKey string         `json:"idempotencyKey"`
+	OwnerUserID    int            `json:"-"`
+	HostUserIDs    []int          `json:"-"`
 }
 
 type CancelRequest struct {
@@ -208,8 +213,10 @@ func (s *Store) Create(ctx context.Context, requestID string, req CreateRequest)
 	}
 
 	created := fixtureBooking(requestID, Booking{
-		Start: start,
-		End:   end,
+		Start:       start,
+		End:         end,
+		OwnerUserID: req.OwnerUserID,
+		HostUserIDs: req.HostUserIDs,
 		Attendees: []Attendee{
 			attendeeValue,
 		},
@@ -458,9 +465,11 @@ func fixtureBooking(requestID string, overrides Booking) Booking {
 		Metadata: map[string]any{
 			"fixture": "personal-basic",
 		},
-		CreatedAt: "2026-01-01T00:00:00.000Z",
-		UpdatedAt: "2026-01-01T00:00:00.000Z",
-		RequestID: requestID,
+		CreatedAt:   "2026-01-01T00:00:00.000Z",
+		UpdatedAt:   "2026-01-01T00:00:00.000Z",
+		RequestID:   requestID,
+		OwnerUserID: FixtureOwnerUserID,
+		HostUserIDs: []int{FixtureOwnerUserID},
 	}
 	return mergeBooking(base, overrides)
 }
@@ -545,6 +554,12 @@ func mergeBooking(base Booking, overrides Booking) Booking {
 	}
 	if overrides.RequestID != "" {
 		base.RequestID = overrides.RequestID
+	}
+	if overrides.OwnerUserID != 0 {
+		base.OwnerUserID = overrides.OwnerUserID
+	}
+	if overrides.HostUserIDs != nil {
+		base.HostUserIDs = overrides.HostUserIDs
 	}
 	return base
 }

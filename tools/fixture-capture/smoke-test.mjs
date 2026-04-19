@@ -89,6 +89,7 @@ function runCapture(baseUrl, outputRoot, manifestName) {
     ],
     {
       CALDIY_API_KEY: "cal_test_valid_mock",
+      CALDIY_WRONG_OWNER_API_KEY: "cal_test_wrong_owner_mock",
       CALDIY_OAUTH_CLIENT_ID: "mock-oauth-client",
       CALDIY_PLATFORM_CLIENT_ID: "mock-platform-client",
       CALDIY_PLATFORM_CLIENT_SECRET: "mock-platform-secret",
@@ -121,6 +122,7 @@ function runReplay(baseUrl, outputRoot, manifestName) {
     ],
     {
       CALDIY_API_KEY: "cal_test_valid_mock",
+      CALDIY_WRONG_OWNER_API_KEY: "cal_test_wrong_owner_mock",
       CALDIY_OAUTH_CLIENT_ID: "mock-oauth-client",
       CALDIY_PLATFORM_CLIENT_ID: "mock-platform-client",
       CALDIY_PLATFORM_CLIENT_SECRET: "mock-platform-secret",
@@ -197,6 +199,12 @@ try {
   assertCaptured(outputRoot, "booking-lifecycle", "booking.confirm.host", 200);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.decline.host", 200);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.unauthorized-user-denied", 403);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.create.wrong-owner-denied", 403);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.read.wrong-owner-denied", 403);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.cancel.wrong-owner-denied", 403);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.reschedule.wrong-owner-denied", 403);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.confirm.wrong-host-denied", 403);
+  assertCaptured(outputRoot, "booking-lifecycle", "booking.decline.wrong-host-denied", 403);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.secret-field-denied", 400);
   assertCaptured(outputRoot, "booking-lifecycle", "booking.create.unavailable-slot-denied", 400);
   assertCaptured(outputRoot, "slots", "slots.read.personal-basic", 200);

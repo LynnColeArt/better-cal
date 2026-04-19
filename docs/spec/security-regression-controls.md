@@ -104,6 +104,8 @@ Booking:
 
 - booking create with unavailable slot;
 - booking create with insufficient permission;
+- booking read/write by a permissioned wrong owner;
+- booking confirm or decline by a permissioned non-host;
 - booking create duplicate idempotency key;
 - booking cancel by unauthorized user;
 - booking reschedule by unauthorized user;

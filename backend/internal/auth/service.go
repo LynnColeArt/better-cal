@@ -55,6 +55,8 @@ type Service struct {
 	platformClients      PlatformClientRepository
 }
 
+const FixtureWrongOwnerAPIKey = "cal_test_wrong_owner_mock"
+
 type ServiceOption func(*Service)
 
 func WithAPIKeyPrincipalRepository(repo APIKeyPrincipalRepository) ServiceOption {
@@ -103,6 +105,9 @@ func (s *Service) AuthenticateAPIKeyContext(ctx context.Context, authorization s
 	}
 
 	if !secureEqual(token, s.apiKey) {
+		if secureEqual(token, FixtureWrongOwnerAPIKey) {
+			return FixtureWrongOwnerAPIKeyPrincipal(), true, nil
+		}
 		return Principal{}, false, nil
 	}
 
@@ -127,6 +132,15 @@ func FixtureAPIKeyPrincipal() Principal {
 		CreatedAt: "2026-01-01T00:00:00.000Z",
 		UpdatedAt: "2026-01-01T00:00:00.000Z",
 	}
+}
+
+func FixtureWrongOwnerAPIKeyPrincipal() Principal {
+	principal := FixtureAPIKeyPrincipal()
+	principal.ID = 999
+	principal.UUID = "00000000-0000-4000-8000-000000000999"
+	principal.Username = "fixture-wrong-owner"
+	principal.Email = "fixture-wrong-owner@example.test"
+	return principal
 }
 
 func (s *Service) OAuthClient(clientID string) (OAuthClient, bool) {

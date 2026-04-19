@@ -126,6 +126,29 @@ func TestBookingValidationErrorReturnsBadRequestWithoutEchoingSecret(t *testing.
 	}
 }
 
+func TestBookingResourceAuthorizationDeniesWrongOwner(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	createBody := map[string]any{
+		"eventTypeId": 1001,
+		"start":       "2026-05-01T15:00:00.000Z",
+		"attendee": map[string]any{
+			"name":     "Fixture Attendee",
+			"email":    "fixture-attendee@example.test",
+			"timeZone": "America/Chicago",
+		},
+	}
+
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings", "Bearer "+auth.FixtureWrongOwnerAPIKey, createBody, http.StatusForbidden)
+	assertStatus(t, server.URL, http.MethodGet, "/v2/bookings/mock-booking-personal-basic", "Bearer "+auth.FixtureWrongOwnerAPIKey, nil, http.StatusForbidden)
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/cancel", "Bearer "+auth.FixtureWrongOwnerAPIKey, map[string]any{"cancellationReason": "Fixture cancellation"}, http.StatusForbidden)
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/reschedule", "Bearer "+auth.FixtureWrongOwnerAPIKey, map[string]any{"start": "2026-05-02T15:00:00.000Z"}, http.StatusForbidden)
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-pending-confirm/confirm", "Bearer "+auth.FixtureWrongOwnerAPIKey, map[string]any{}, http.StatusForbidden)
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-pending-decline/decline", "Bearer "+auth.FixtureWrongOwnerAPIKey, map[string]any{"reason": "Fixture decline"}, http.StatusForbidden)
+}
+
 func TestRequestIDPropagatesToResponse(t *testing.T) {
 	handler := NewServer(testConfig())
 	server := httptest.NewServer(handler)

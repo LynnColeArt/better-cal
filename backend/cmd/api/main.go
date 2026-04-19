@@ -45,6 +45,11 @@ func main() {
 			slog.Error("api key principal seed failed", "error", err)
 			os.Exit(1)
 		}
+		if err := authRepository.SaveAPIKeyPrincipal(ctx, auth.FixtureWrongOwnerAPIKey, auth.FixtureWrongOwnerAPIKeyPrincipal()); err != nil {
+			cancel()
+			slog.Error("wrong-owner api key principal seed failed", "error", err)
+			os.Exit(1)
+		}
 		if err := authRepository.SaveOAuthClient(ctx, auth.FixtureOAuthClient(cfg.OAuthClientID)); err != nil {
 			cancel()
 			slog.Error("oauth client seed failed", "error", err)

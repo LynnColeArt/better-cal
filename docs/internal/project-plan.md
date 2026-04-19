@@ -70,7 +70,7 @@ Deliverables:
 
 - session verifier for NextAuth JWT or a Next.js identity bridge;
 - user/profile/org/team membership resolver;
-- explicit policy package for system admin, org owner/admin/member, team roles, platform OAuth permissions, PBAC-style checks;
+- explicit policy package for system admin, org owner/admin/member, team roles, platform OAuth permissions, PBAC-style checks; the first booking read/write/host-action canary now requires both named permissions and owner or host resource scope;
 - route policy manifests and secret classification for every auth-protected route;
 - API key verifier;
 - platform OAuth client/access-token verifier;
@@ -86,7 +86,7 @@ Exit criteria:
 - auth matrix passes in Go and matches legacy for valid behavior;
 - intentional security breaks have regression tests;
 - route policy coverage and secret scanners pass for implemented routes;
-- no service endpoint relies on email as primary identity.
+- no service endpoint relies on email as primary identity; the implemented booking routes now gate fixture resources by immutable principal id, not email.
 
 ## Phase 3: Read-Heavy Domains
 

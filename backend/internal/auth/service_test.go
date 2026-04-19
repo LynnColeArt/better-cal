@@ -39,6 +39,21 @@ func TestAuthenticateAPIKeyRejectsEmptyConfiguredSecret(t *testing.T) {
 	}
 }
 
+func TestAuthenticateAPIKeySupportsWrongOwnerFixturePrincipal(t *testing.T) {
+	service := NewService(testConfig())
+
+	principal, ok := service.AuthenticateAPIKey("Bearer " + FixtureWrongOwnerAPIKey)
+	if !ok {
+		t.Fatal("expected wrong-owner fixture token to authenticate")
+	}
+	if principal.ID != 999 {
+		t.Fatalf("principal id = %d", principal.ID)
+	}
+	if !hasPrincipalPermission(principal.Permissions, "booking:write") || !hasPrincipalPermission(principal.Permissions, "booking:host-action") {
+		t.Fatalf("permissions = %#v", principal.Permissions)
+	}
+}
+
 func TestAuthenticateAPIKeyUsesRepositoryWhenConfigured(t *testing.T) {
 	service := NewService(testConfig(), WithAPIKeyPrincipalRepository(&fakeAPIKeyPrincipalRepository{
 		byToken: map[string]Principal{
@@ -278,4 +293,13 @@ func (r *fakePlatformClientRepository) ReadPlatformClient(_ context.Context, cli
 	}
 	record, ok := r.byID[clientID]
 	return record, ok, nil
+}
+
+func hasPrincipalPermission(permissions []string, expected string) bool {
+	for _, permission := range permissions {
+		if permission == expected {
+			return true
+		}
+	}
+	return false
 }

@@ -112,6 +112,15 @@ function authorized(req) {
   return bearerToken(req) === "cal_test_valid_mock";
 }
 
+function authenticatedBookingPrincipal(req) {
+  const token = bearerToken(req);
+  return token === "cal_test_valid_mock" || token === "cal_test_wrong_owner_mock";
+}
+
+function ownsFixtureBooking(req) {
+  return bearerToken(req) === "cal_test_valid_mock";
+}
+
 export function createMockApiV2Server() {
   const bookings = new Map();
   const idempotency = new Map();
@@ -205,7 +214,18 @@ export function createMockApiV2Server() {
     }
 
     if (req.method === "POST" && path === "/v2/bookings") {
-      if (!authorized(req)) {
+      if (!authenticatedBookingPrincipal(req)) {
+        sendJson(res, 403, {
+          status: "error",
+          error: {
+            code: "FORBIDDEN",
+            message: "Insufficient permissions",
+            requestId: "mock-request-id",
+          },
+        });
+        return;
+      }
+      if (!ownsFixtureBooking(req)) {
         sendJson(res, 403, {
           status: "error",
           error: {
@@ -278,8 +298,15 @@ export function createMockApiV2Server() {
 
     const bookingByUid = path.match(/^\/v2\/bookings\/([^/]+)$/);
     if (req.method === "GET" && bookingByUid) {
-      if (!authorized(req)) {
+      if (!authenticatedBookingPrincipal(req)) {
         sendJson(res, 401, { status: "error", error: { code: "UNAUTHORIZED", requestId: "mock-request-id" } });
+        return;
+      }
+      if (!ownsFixtureBooking(req)) {
+        sendJson(res, 403, {
+          status: "error",
+          error: { code: "FORBIDDEN", message: "Insufficient permissions", requestId: "mock-request-id" },
+        });
         return;
       }
 
@@ -299,7 +326,11 @@ export function createMockApiV2Server() {
 
     const bookingCancel = path.match(/^\/v2\/bookings\/([^/]+)\/cancel$/);
     if (req.method === "POST" && bookingCancel) {
-      if (!authorized(req)) {
+      if (!authenticatedBookingPrincipal(req)) {
+        sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
+        return;
+      }
+      if (!ownsFixtureBooking(req)) {
         sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
         return;
       }
@@ -328,7 +359,11 @@ export function createMockApiV2Server() {
 
     const bookingReschedule = path.match(/^\/v2\/bookings\/([^/]+)\/reschedule$/);
     if (req.method === "POST" && bookingReschedule) {
-      if (!authorized(req)) {
+      if (!authenticatedBookingPrincipal(req)) {
+        sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
+        return;
+      }
+      if (!ownsFixtureBooking(req)) {
         sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
         return;
       }
@@ -371,7 +406,11 @@ export function createMockApiV2Server() {
 
     const bookingConfirm = path.match(/^\/v2\/bookings\/([^/]+)\/confirm$/);
     if (req.method === "POST" && bookingConfirm) {
-      if (!authorized(req)) {
+      if (!authenticatedBookingPrincipal(req)) {
+        sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
+        return;
+      }
+      if (!ownsFixtureBooking(req)) {
         sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
         return;
       }
@@ -400,7 +439,11 @@ export function createMockApiV2Server() {
 
     const bookingDecline = path.match(/^\/v2\/bookings\/([^/]+)\/decline$/);
     if (req.method === "POST" && bookingDecline) {
-      if (!authorized(req)) {
+      if (!authenticatedBookingPrincipal(req)) {
+        sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
+        return;
+      }
+      if (!ownsFixtureBooking(req)) {
         sendJson(res, 403, { status: "error", error: { code: "FORBIDDEN", requestId: "mock-request-id" } });
         return;
       }

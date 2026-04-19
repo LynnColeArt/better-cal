@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 	"github.com/LynnColeArt/better-cal/backend/internal/slots"
@@ -90,6 +91,14 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
 		return
 	}
+	if resource, ok := eventTypeBookingResource(body.EventTypeID); ok {
+		if !s.authorizeBooking(principal, authz.PolicyBookingWrite, resource) {
+			s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+			return
+		}
+		body.OwnerUserID = resource.OwnerUserID
+		body.HostUserIDs = resource.HostUserIDs
+	}
 
 	created, duplicate, err := s.bookings().Create(r.Context(), s.requestID(r), body)
 	if err != nil {
@@ -119,6 +128,10 @@ func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uid := r.PathValue("bookingUid")
+	if resource, ok := bookingResourceForUID(uid); ok && !s.authorizeBooking(principal, authz.PolicyBookingRead, resource) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
 	found, ok, err := s.bookings().Read(r.Context(), s.requestID(r), uid)
 	if err != nil {
 		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
@@ -126,6 +139,10 @@ func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "Booking not found", true)
+		return
+	}
+	if !s.authorizeBooking(principal, authz.PolicyBookingRead, bookingResource(found)) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
 		return
 	}
 
@@ -147,13 +164,31 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uid := r.PathValue("bookingUid")
+	if resource, ok := bookingResourceForUID(uid); ok && !s.authorizeBooking(principal, authz.PolicyBookingWrite, resource) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	found, foundOK, err := s.bookings().Read(r.Context(), s.requestID(r), uid)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !foundOK {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
+		return
+	}
+	if !s.authorizeBooking(principal, authz.PolicyBookingWrite, bookingResource(found)) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+
 	var body booking.CancelRequest
 	if !decodeJSON(r, &body) {
 		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
 		return
 	}
 
-	uid := r.PathValue("bookingUid")
 	result, ok, err := s.bookings().Cancel(r.Context(), s.requestID(r), uid, body)
 	if err != nil {
 		s.sendBookingServiceError(w, r, err)
@@ -186,13 +221,31 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	oldUID := r.PathValue("bookingUid")
+	if resource, ok := bookingResourceForUID(oldUID); ok && !s.authorizeBooking(principal, authz.PolicyBookingWrite, resource) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	found, foundOK, err := s.bookings().Read(r.Context(), s.requestID(r), oldUID)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !foundOK {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
+		return
+	}
+	if !s.authorizeBooking(principal, authz.PolicyBookingWrite, bookingResource(found)) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+
 	var body booking.RescheduleRequest
 	if !decodeJSON(r, &body) {
 		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
 		return
 	}
 
-	oldUID := r.PathValue("bookingUid")
 	result, ok, err := s.bookings().Reschedule(r.Context(), s.requestID(r), oldUID, body)
 	if err != nil {
 		s.sendBookingServiceError(w, r, err)
@@ -230,13 +283,31 @@ func (s *Server) confirmBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uid := r.PathValue("bookingUid")
+	if resource, ok := bookingResourceForUID(uid); ok && !s.authorizeBooking(principal, authz.PolicyBookingHostAction, resource) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	found, foundOK, err := s.bookings().Read(r.Context(), s.requestID(r), uid)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !foundOK {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
+		return
+	}
+	if !s.authorizeBooking(principal, authz.PolicyBookingHostAction, bookingResource(found)) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+
 	var body booking.ConfirmRequest
 	if !decodeJSON(r, &body) {
 		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
 		return
 	}
 
-	uid := r.PathValue("bookingUid")
 	result, ok, err := s.bookings().Confirm(r.Context(), s.requestID(r), uid, body)
 	if err != nil {
 		s.sendBookingServiceError(w, r, err)
@@ -269,13 +340,31 @@ func (s *Server) declineBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uid := r.PathValue("bookingUid")
+	if resource, ok := bookingResourceForUID(uid); ok && !s.authorizeBooking(principal, authz.PolicyBookingHostAction, resource) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+	found, foundOK, err := s.bookings().Read(r.Context(), s.requestID(r), uid)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !foundOK {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "", true)
+		return
+	}
+	if !s.authorizeBooking(principal, authz.PolicyBookingHostAction, bookingResource(found)) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "", true)
+		return
+	}
+
 	var body booking.DeclineRequest
 	if !decodeJSON(r, &body) {
 		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
 		return
 	}
 
-	uid := r.PathValue("bookingUid")
 	result, ok, err := s.bookings().Decline(r.Context(), s.requestID(r), uid, body)
 	if err != nil {
 		s.sendBookingServiceError(w, r, err)
@@ -381,6 +470,47 @@ func (s *Server) sendSlotServiceError(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+}
+
+func (s *Server) authorizeBooking(principal auth.Principal, policy authz.Policy, resource authz.BookingResource) bool {
+	return s.policies().AuthorizeBooking(principal, policy, resource).Allowed
+}
+
+func eventTypeBookingResource(eventTypeID int) (authz.BookingResource, bool) {
+	if eventTypeID != 0 && eventTypeID != booking.FixtureEventTypeID {
+		return authz.BookingResource{}, false
+	}
+	return authz.BookingResource{
+		OwnerUserID: booking.FixtureOwnerUserID,
+		HostUserIDs: []int{booking.FixtureOwnerUserID},
+	}, true
+}
+
+func bookingResource(bookingValue booking.Booking) authz.BookingResource {
+	ownerUserID := bookingValue.OwnerUserID
+	if ownerUserID == 0 {
+		ownerUserID = booking.FixtureOwnerUserID
+	}
+	hostUserIDs := bookingValue.HostUserIDs
+	if len(hostUserIDs) == 0 {
+		hostUserIDs = []int{ownerUserID}
+	}
+	return authz.BookingResource{
+		OwnerUserID: ownerUserID,
+		HostUserIDs: hostUserIDs,
+	}
+}
+
+func bookingResourceForUID(uid string) (authz.BookingResource, bool) {
+	switch uid {
+	case booking.PrimaryFixtureUID, booking.RescheduledFixtureUID, booking.PendingConfirmFixtureUID, booking.PendingDeclineFixtureUID:
+		return authz.BookingResource{
+			OwnerUserID: booking.FixtureOwnerUserID,
+			HostUserIDs: []int{booking.FixtureOwnerUserID},
+		}, true
+	default:
+		return authz.BookingResource{}, false
+	}
 }
 
 func parseOptionalInt(value string) (int, error) {

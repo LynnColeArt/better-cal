@@ -19,6 +19,11 @@ type Decision struct {
 	Reason  string
 }
 
+type BookingResource struct {
+	OwnerUserID int
+	HostUserIDs []int
+}
+
 type Authorizer struct {
 	requiredPermissions map[Policy][]string
 }
@@ -54,6 +59,36 @@ func (a *Authorizer) Authorize(principal auth.Principal, policy Policy) Decision
 		}
 	}
 	return Decision{Allowed: true}
+}
+
+func (a *Authorizer) AuthorizeBooking(principal auth.Principal, policy Policy, resource BookingResource) Decision {
+	decision := a.Authorize(principal, policy)
+	if !decision.Allowed {
+		return decision
+	}
+
+	switch policy {
+	case PolicyBookingRead, PolicyBookingWrite:
+		if resource.OwnerUserID == 0 {
+			return Decision{Allowed: false, Reason: "missing booking owner"}
+		}
+		if principal.ID == resource.OwnerUserID {
+			return Decision{Allowed: true}
+		}
+		return Decision{Allowed: false, Reason: "principal does not own booking resource"}
+	case PolicyBookingHostAction:
+		if len(resource.HostUserIDs) == 0 {
+			return Decision{Allowed: false, Reason: "missing booking hosts"}
+		}
+		for _, hostID := range resource.HostUserIDs {
+			if principal.ID == hostID {
+				return Decision{Allowed: true}
+			}
+		}
+		return Decision{Allowed: false, Reason: "principal is not booking host"}
+	default:
+		return decision
+	}
 }
 
 func hasPermission(permissions []string, required string) bool {

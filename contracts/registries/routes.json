@@ -105,7 +105,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.write",
       "schemaRefs": ["schema.api-v2.booking.create.request", "schema.api-v2.booking.create.response"],
-      "fixtureRefs": ["booking.create.personal-basic", "booking.create.duplicate-idempotency-key", "booking.create.unauthorized-user-denied", "booking.create.secret-field-denied", "booking.create.unavailable-slot-denied"]
+      "fixtureRefs": ["booking.create.personal-basic", "booking.create.duplicate-idempotency-key", "booking.create.unauthorized-user-denied", "booking.create.wrong-owner-denied", "booking.create.secret-field-denied", "booking.create.unavailable-slot-denied"]
     },
     {
       "id": "api-v2.bookings.get",
@@ -118,7 +118,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.read",
       "schemaRefs": ["schema.api-v2.booking.response"],
-      "fixtureRefs": ["booking.read.by-uid"]
+      "fixtureRefs": ["booking.read.by-uid", "booking.read.wrong-owner-denied"]
     },
     {
       "id": "api-v2.bookings.cancel",
@@ -131,7 +131,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.write",
       "schemaRefs": ["schema.api-v2.booking.cancel.request", "schema.api-v2.booking.cancel.response"],
-      "fixtureRefs": ["booking.cancel.owner"]
+      "fixtureRefs": ["booking.cancel.owner", "booking.cancel.wrong-owner-denied"]
     },
     {
       "id": "api-v2.bookings.reschedule",
@@ -144,7 +144,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.write",
       "schemaRefs": ["schema.api-v2.booking.reschedule.request", "schema.api-v2.booking.reschedule.response"],
-      "fixtureRefs": ["booking.reschedule.owner"]
+      "fixtureRefs": ["booking.reschedule.owner", "booking.reschedule.wrong-owner-denied"]
     },
     {
       "id": "api-v2.bookings.confirm",
@@ -157,7 +157,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.host-action",
       "schemaRefs": ["schema.api-v2.booking.confirm.response"],
-      "fixtureRefs": ["booking.confirm.host"]
+      "fixtureRefs": ["booking.confirm.host", "booking.confirm.wrong-host-denied"]
     },
     {
       "id": "api-v2.bookings.decline",
@@ -170,7 +170,7 @@
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.host-action",
       "schemaRefs": ["schema.api-v2.booking.decline.request", "schema.api-v2.booking.decline.response"],
-      "fixtureRefs": ["booking.decline.host"]
+      "fixtureRefs": ["booking.decline.host", "booking.decline.wrong-host-denied"]
     }
   ]
 }

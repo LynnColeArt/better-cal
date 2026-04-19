@@ -64,7 +64,7 @@
       "principalTypes": ["user", "platform-client", "managed-user", "anonymous-token-holder"],
       "requiredPermissions": ["booking:read"],
       "resourceResolver": "booking-by-public-uid",
-      "negativeFixtures": ["wrong-owner", "wrong-organization", "invalid-public-token"]
+      "negativeFixtures": ["booking.read.wrong-owner-denied", "wrong-organization", "invalid-public-token"]
     },
     {
       "id": "policy.booking.write",
@@ -73,7 +73,7 @@
       "principalTypes": ["user", "platform-client", "managed-user", "anonymous-token-holder"],
       "requiredPermissions": ["booking:write"],
       "resourceResolver": "booking-target-event-type",
-      "negativeFixtures": ["booking.create.unauthorized-user-denied", "booking.create.unavailable-slot-denied", "wrong-owner", "wrong-organization"]
+      "negativeFixtures": ["booking.create.unauthorized-user-denied", "booking.create.wrong-owner-denied", "booking.cancel.wrong-owner-denied", "booking.reschedule.wrong-owner-denied", "booking.create.unavailable-slot-denied", "wrong-organization"]
     },
     {
       "id": "policy.booking.host-action",
@@ -82,7 +82,7 @@
       "principalTypes": ["user", "platform-client", "managed-user"],
       "requiredPermissions": ["booking:host-action"],
       "resourceResolver": "booking-host-or-platform-permission",
-      "negativeFixtures": ["not-host", "wrong-team", "insufficient-permission"]
+      "negativeFixtures": ["booking.confirm.wrong-host-denied", "booking.decline.wrong-host-denied", "wrong-team", "insufficient-permission"]
     },
     {
       "id": "policy.slots.read",

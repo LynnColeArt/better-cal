@@ -9,6 +9,7 @@ import { createMockApiV2Server } from "../fixture-capture/mock-api-v2-server.mjs
 const projectRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const fixtureEnv = {
   CALDIY_API_KEY: "cal_test_valid_mock",
+  CALDIY_WRONG_OWNER_API_KEY: "cal_test_wrong_owner_mock",
   CALDIY_OAUTH_CLIENT_ID: "mock-oauth-client",
   CALDIY_PLATFORM_CLIENT_ID: "mock-platform-client",
   CALDIY_PLATFORM_CLIENT_SECRET: "mock-platform-secret",
