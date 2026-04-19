@@ -3,6 +3,7 @@ package booking
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -204,6 +205,137 @@ func TestPostgresRepositoryRollsBackBookingWhenSideEffectWriteFails(t *testing.T
 		t.Fatal("expected side-effect persistence error")
 	}
 	assertBookingRowCount(t, ctx, pool, uid, 0)
+}
+
+func TestPostgresRepositoryClaimsAndMarksPlannedSideEffects(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	uid := fmt.Sprintf("repo-side-effect-claim-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+	})
+
+	if err := repo.Save(ctx, []PlannedSideEffect{
+		{Name: SideEffectEmailCancelled, BookingUID: uid, RequestID: "claim-request"},
+		{Name: SideEffectWebhookBookingCancelled, BookingUID: uid, RequestID: "claim-request"},
+	}, repositoryTestBooking(uid, "claim-request")); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := repo.ClaimPlannedSideEffects(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 2 {
+		t.Fatalf("claimed side effects = %d, want 2", len(claimed))
+	}
+	for _, record := range claimed {
+		if record.BookingUID != uid {
+			t.Fatalf("claimed booking uid = %q, want %q", record.BookingUID, uid)
+		}
+		if record.Status != "processing" {
+			t.Fatalf("claimed status = %q, want processing", record.Status)
+		}
+		if record.Attempts != 1 {
+			t.Fatalf("claimed attempts = %d, want 1", record.Attempts)
+		}
+	}
+
+	claimedAgain, err := repo.ClaimPlannedSideEffects(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimedAgain) != 0 {
+		t.Fatalf("claimed processing side effects = %d, want 0", len(claimedAgain))
+	}
+
+	if err := repo.MarkPlannedSideEffectDelivered(ctx, claimed[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkPlannedSideEffectFailed(ctx, claimed[1].ID, errors.New("provider exploded: api-key-secret")); err != nil {
+		t.Fatal(err)
+	}
+
+	var deliveredStatus string
+	if err := pool.QueryRow(ctx, `
+		select status
+		from booking_planned_side_effects
+		where id = $1
+	`, claimed[0].ID).Scan(&deliveredStatus); err != nil {
+		t.Fatal(err)
+	}
+	if deliveredStatus != "delivered" {
+		t.Fatalf("delivered status = %q", deliveredStatus)
+	}
+
+	var failedStatus string
+	var failedLastError string
+	var failedAttempts int
+	if err := pool.QueryRow(ctx, `
+		select status, last_error, attempts
+		from booking_planned_side_effects
+		where id = $1
+	`, claimed[1].ID).Scan(&failedStatus, &failedLastError, &failedAttempts); err != nil {
+		t.Fatal(err)
+	}
+	if failedStatus != "failed" {
+		t.Fatalf("failed status = %q", failedStatus)
+	}
+	if failedLastError != "dispatch failed" {
+		t.Fatalf("failed last_error = %q", failedLastError)
+	}
+	if failedAttempts != 1 {
+		t.Fatalf("failed attempts = %d, want 1", failedAttempts)
+	}
+}
+
+func TestPostgresRepositoryClaimLimit(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	uid := fmt.Sprintf("repo-side-effect-limit-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+	})
+
+	if err := repo.Save(ctx, []PlannedSideEffect{
+		{Name: SideEffectEmailCancelled, BookingUID: uid, RequestID: "limit-request"},
+		{Name: SideEffectWebhookBookingCancelled, BookingUID: uid, RequestID: "limit-request"},
+	}, repositoryTestBooking(uid, "limit-request")); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := repo.ClaimPlannedSideEffects(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("claimed side effects = %d, want 1", len(claimed))
+	}
+
+	var planned int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from booking_planned_side_effects
+		where booking_uid = $1
+			and status = 'planned'
+	`, uid).Scan(&planned); err != nil {
+		t.Fatal(err)
+	}
+	if planned != 1 {
+		t.Fatalf("planned side effects = %d, want 1", planned)
+	}
 }
 
 func TestPostgresRepositoryFallsBackToFixturePayload(t *testing.T) {

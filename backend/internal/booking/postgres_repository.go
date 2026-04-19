@@ -197,6 +197,99 @@ func (r *PostgresRepository) Save(ctx context.Context, effects []PlannedSideEffe
 	})
 }
 
+func (r *PostgresRepository) ClaimPlannedSideEffects(ctx context.Context, limit int) ([]PlannedSideEffectRecord, error) {
+	if limit <= 0 {
+		limit = defaultSideEffectClaimLimit
+	}
+
+	records := []PlannedSideEffectRecord{}
+	if err := db.WithTx(ctx, r.pool, func(tx db.Tx) error {
+		rows, err := tx.Query(ctx, `
+			with candidate as (
+				select id
+				from booking_planned_side_effects
+				where status in ('planned', 'failed')
+					and next_attempt_at <= now()
+				order by created_at, id
+				limit $1
+				for update skip locked
+			)
+			update booking_planned_side_effects side_effect
+			set status = 'processing',
+				locked_at = now(),
+				attempts = side_effect.attempts + 1,
+				last_error = null
+			from candidate
+			where side_effect.id = candidate.id
+			returning side_effect.id,
+				side_effect.name,
+				side_effect.booking_uid,
+				side_effect.request_id,
+				side_effect.attempts,
+				side_effect.status
+		`, limit)
+		if err != nil {
+			return fmt.Errorf("claim planned side effects: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var record PlannedSideEffectRecord
+			var name string
+			if err := rows.Scan(&record.ID, &name, &record.BookingUID, &record.RequestID, &record.Attempts, &record.Status); err != nil {
+				return fmt.Errorf("scan planned side effect: %w", err)
+			}
+			record.Name = SideEffectName(name)
+			records = append(records, record)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("read planned side effects: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (r *PostgresRepository) MarkPlannedSideEffectDelivered(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `
+		update booking_planned_side_effects
+		set status = 'delivered',
+			delivered_at = now(),
+			locked_at = null,
+			last_error = null
+		where id = $1
+			and status = 'processing'
+	`, id)
+	if err != nil {
+		return fmt.Errorf("mark planned side effect delivered: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("mark planned side effect delivered: side effect %d was not processing", id)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) MarkPlannedSideEffectFailed(ctx context.Context, id int64, dispatchErr error) error {
+	tag, err := r.pool.Exec(ctx, `
+		update booking_planned_side_effects
+		set status = 'failed',
+			locked_at = null,
+			last_error = $2,
+			next_attempt_at = now() + (least(60, greatest(attempts, 1) * 5) * interval '1 second')
+		where id = $1
+			and status = 'processing'
+	`, id, safeDispatchError(dispatchErr))
+	if err != nil {
+		return fmt.Errorf("mark planned side effect failed: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("mark planned side effect failed: side effect %d was not processing", id)
+	}
+	return nil
+}
+
 func saveBooking(ctx context.Context, tx db.Tx, booking Booking) error {
 	if err := saveStructuredBooking(ctx, tx, booking); err != nil {
 		return err
@@ -317,4 +410,8 @@ func decodeBooking(raw []byte) (Booking, error) {
 		return Booking{}, fmt.Errorf("decode booking fixture: %w", err)
 	}
 	return bookingValue, nil
+}
+
+func safeDispatchError(error) string {
+	return "dispatch failed"
 }
