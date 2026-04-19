@@ -120,7 +120,7 @@ Goal: port the scheduling core before booking writes.
 Deliverables:
 
 - schedule and availability services;
-- slot lookup by event type, time range, and timezone; the first `GET /v2/slots` canary is now captured and served by `backend/internal/slots/`, and booking creation calls the same service through a validation-only availability adapter;
+- slot lookup by event type, time range, and timezone; the first `GET /v2/slots` canary is now captured and served by `backend/internal/slots/`, booking creation calls the same service through a validation-only availability adapter, and the Compose path now reads the fixture slot from `event_types` and `availability_slots`;
 - busy-time provider ports for internal bookings and external calendars;
 - selected-calendar and destination-calendar handling;
 - timezone and DST test suite;
@@ -136,7 +136,7 @@ Exit criteria:
 
 - slot golden tests match legacy for representative scenarios;
 - performance is measured against existing heavy slot paths;
-- booking creation can call the Go slot engine in validation-only mode. The first slot-service adapter rejects unavailable create requests before persistence.
+- booking creation can call the Go slot engine in validation-only mode. The first slot-service adapter rejects unavailable create requests before persistence and can read the fixture slot from Postgres.
 
 ## Phase 5: Booking Write Path
 

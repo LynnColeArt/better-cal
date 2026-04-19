@@ -14,7 +14,7 @@ The first implementation slice is deliberately small and fixture-driven. It supp
 - `POST /v2/bookings/{bookingUid}/cancel`
 - `POST /v2/bookings/{bookingUid}/reschedule`
 
-The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, a slot service for the current accepted availability fixture, and a booking service for the current accepted lifecycle fixtures. Booking creation calls the slot service through an availability adapter before persistence so unavailable fixture slots are rejected by the same service boundary that backs `GET /v2/slots`. When `CALDIY_DATABASE_URL` is set, API-key principal lookup, OAuth client metadata lookup, platform client verification, explicit booking rows, booking fixture fallback state, and idempotency keys are stored in Postgres through repository adapters; otherwise the service falls back to config and in-memory fixture state.
+The API shell includes request ID propagation, panic recovery, structured request logging with secret-bearing headers redacted, a small auth service that resolves fixture API-key principals, OAuth clients, and platform clients, an explicit deny-by-default authz package for named route policies, a slot service for the current accepted availability fixture, and a booking service for the current accepted lifecycle fixtures. Booking creation calls the slot service through an availability adapter before persistence so unavailable fixture slots are rejected by the same service boundary that backs `GET /v2/slots`. When `CALDIY_DATABASE_URL` is set, API-key principal lookup, OAuth client metadata lookup, platform client verification, explicit booking rows, booking fixture fallback state, idempotency keys, event type metadata, and fixture availability slots are stored in Postgres through repository adapters; otherwise the service falls back to config and in-memory fixture state.
 
 Run locally:
 
@@ -39,7 +39,7 @@ go test ./...
 Run the Postgres-backed database integration tests against the Compose database:
 
 ```bash
-CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" go test ./internal/db ./internal/auth ./internal/booking
+CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" go test ./internal/db ./internal/auth ./internal/booking ./internal/slots
 ```
 
 Run contract replay smoke from the repository root:
@@ -48,4 +48,4 @@ Run contract replay smoke from the repository root:
 node tools/backend-smoke/smoke-test.mjs
 ```
 
-When `CALDIY_DATABASE_URL` is set, the API opens Postgres, runs embedded migrations, seeds the fixture API-key principal in `api_key_principals` using a SHA-256 token hash, seeds non-secret OAuth client metadata in `oauth_clients`, stores only a SHA-256 hash for platform client secret verification in `platform_clients`, writes booking fields to `bookings` and `booking_attendees`, and keeps `booking_fixtures` as a compatibility fallback with duplicate create detection in `booking_idempotency_keys`. Provider integrations and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.
+When `CALDIY_DATABASE_URL` is set, the API opens Postgres, runs embedded migrations, seeds the fixture API-key principal in `api_key_principals` using a SHA-256 token hash, seeds non-secret OAuth client metadata in `oauth_clients`, stores only a SHA-256 hash for platform client secret verification in `platform_clients`, seeds fixture event type metadata and availability in `event_types` and `availability_slots`, writes booking fields to `bookings` and `booking_attendees`, and keeps `booking_fixtures` as a compatibility fallback with duplicate create detection in `booking_idempotency_keys`. Provider integrations and durable side effects will be added behind the same API adapter surface as the accepted contracts expand.

@@ -19,7 +19,7 @@ import (
 func main() {
 	cfg := config.FromEnv()
 	slotService := slots.NewService()
-	serverOptions := []httpapi.Option{httpapi.WithSlotService(slotService)}
+	serverOptions := []httpapi.Option{}
 	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		pool, err := db.Open(ctx, cfg.DatabaseURL)
@@ -55,6 +55,13 @@ func main() {
 			slog.Error("platform client seed failed", "error", err)
 			os.Exit(1)
 		}
+		slotRepository := slots.NewPostgresRepository(pool)
+		if err := slots.SeedFixtureAvailability(ctx, slotRepository); err != nil {
+			cancel()
+			slog.Error("slot availability seed failed", "error", err)
+			os.Exit(1)
+		}
+		slotService = slots.NewService(slots.WithRepository(slotRepository))
 		serverOptions = append(serverOptions, httpapi.WithAuthService(
 			auth.NewService(
 				cfg,
@@ -72,6 +79,7 @@ func main() {
 		cancel()
 		slog.Info("database connection ready")
 	}
+	serverOptions = append(serverOptions, httpapi.WithSlotService(slotService))
 
 	server := &http.Server{
 		Addr:    cfg.Addr,
