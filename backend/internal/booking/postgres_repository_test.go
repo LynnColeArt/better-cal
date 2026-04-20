@@ -338,6 +338,65 @@ func TestPostgresRepositoryClaimLimit(t *testing.T) {
 	}
 }
 
+func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	uid := fmt.Sprintf("repo-side-effect-dispatch-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+	})
+
+	if err := repo.Save(ctx, []PlannedSideEffect{
+		{Name: SideEffectEmailCancelled, BookingUID: uid, RequestID: "dispatch-request"},
+	}, repositoryTestBooking(uid, "dispatch-request")); err != nil {
+		t.Fatal(err)
+	}
+
+	var sideEffectID int64
+	if err := pool.QueryRow(ctx, `
+		select id
+		from booking_planned_side_effects
+		where booking_uid = $1
+	`, uid).Scan(&sideEffectID); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := NewPostgresSideEffectDispatcher(pool)
+	record := PlannedSideEffectRecord{
+		ID:         sideEffectID,
+		Name:       SideEffectEmailCancelled,
+		BookingUID: uid,
+		RequestID:  "dispatch-request",
+	}
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+
+	var dispatchRows int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from booking_side_effect_dispatch_log
+		where side_effect_id = $1
+			and booking_uid = $2
+			and name = $3
+			and request_id = $4
+	`, sideEffectID, uid, string(SideEffectEmailCancelled), "dispatch-request").Scan(&dispatchRows); err != nil {
+		t.Fatal(err)
+	}
+	if dispatchRows != 1 {
+		t.Fatalf("dispatch rows = %d, want 1", dispatchRows)
+	}
+}
+
 func TestPostgresRepositoryFallsBackToFixturePayload(t *testing.T) {
 	pool := testPostgresRepositoryPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

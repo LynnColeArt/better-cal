@@ -38,7 +38,8 @@ func main() {
 	}
 
 	repository := booking.NewPostgresRepository(pool)
-	worker := booking.NewSideEffectWorker(repository, booking.NoopSideEffectDispatcher{})
+	dispatcher := booking.NewPostgresSideEffectDispatcher(pool)
+	worker := booking.NewSideEffectWorker(repository, dispatcher)
 	result, err := worker.RunOnce(ctx, 25)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

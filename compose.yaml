@@ -1,10 +1,13 @@
 name: better-cal
 
+x-backend-build: &backend-build
+  context: ./backend
+  dockerfile: Dockerfile
+
 services:
   api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: better-cal-backend
+    build: *backend-build
     environment:
       HOST: 0.0.0.0
       PORT: 8080
@@ -25,6 +28,18 @@ services:
       timeout: 3s
       retries: 6
       start_period: 5s
+
+  worker:
+    image: better-cal-backend
+    build: *backend-build
+    command: ["better-cal-worker"]
+    profiles: ["worker"]
+    environment:
+      CALDIY_DATABASE_URL: postgres://better_cal:better_cal_dev@postgres:5432/better_cal?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   postgres:
     image: postgres:16-alpine

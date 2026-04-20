@@ -31,6 +31,12 @@ Run with Docker Compose from the repository root:
 docker compose up --build
 ```
 
+Run one worker pass through Compose:
+
+```bash
+docker compose --profile worker run --rm worker
+```
+
 Run Go tests:
 
 ```bash
@@ -57,4 +63,4 @@ Run contract replay smoke from the repository root:
 node tools/backend-smoke/smoke-test.mjs
 ```
 
-When `CALDIY_DATABASE_URL` is set, the API opens Postgres, runs embedded migrations, seeds the fixture API-key principal in `api_key_principals` using a SHA-256 token hash, seeds non-secret OAuth client metadata in `oauth_clients`, stores only a SHA-256 hash for platform client secret verification in `platform_clients`, seeds fixture event type metadata and availability in `event_types` and `availability_slots`, writes booking fields to `bookings` and `booking_attendees`, filters availability against accepted booking rows, and keeps `booking_fixtures` as a compatibility fallback with duplicate create detection in `booking_idempotency_keys`. Booking state and planned side effects are committed in one transaction, and idempotency keys are locked so conflicting retries replay the first booking instead of creating stray state. The worker command claims planned or retryable side effects with Postgres row locks, dispatches through the current no-op provider boundary, marks delivered rows, and records only a generic failure marker for retryable dispatch errors. Provider integrations will be added behind the same API adapter surface as the accepted contracts expand.
+When `CALDIY_DATABASE_URL` is set, the API opens Postgres, runs embedded migrations, seeds the fixture API-key principal in `api_key_principals` using a SHA-256 token hash, seeds non-secret OAuth client metadata in `oauth_clients`, stores only a SHA-256 hash for platform client secret verification in `platform_clients`, seeds fixture event type metadata and availability in `event_types` and `availability_slots`, writes booking fields to `bookings` and `booking_attendees`, filters availability against accepted booking rows, and keeps `booking_fixtures` as a compatibility fallback with duplicate create detection in `booking_idempotency_keys`. Booking state and planned side effects are committed in one transaction, and idempotency keys are locked so conflicting retries replay the first booking instead of creating stray state. The worker command claims planned or retryable side effects with Postgres row locks, dispatches through the current durable canary dispatcher, records one `booking_side_effect_dispatch_log` row per side effect, marks delivered rows, and records only a generic failure marker for retryable dispatch errors. Provider integrations will be added behind the same API adapter surface as the accepted contracts expand.
