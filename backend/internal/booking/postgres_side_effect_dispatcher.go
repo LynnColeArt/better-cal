@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,14 +20,16 @@ type PostgresSideEffectDispatcher struct {
 	bookings       BookingReader
 	subscriptions  WebhookSubscriptionStore
 	secretResolver WebhookSigningSecretResolver
+	transport      WebhookAttemptTransport
 }
 
-func NewPostgresSideEffectDispatcher(pool *pgxpool.Pool, bookings BookingReader, subscriptions WebhookSubscriptionStore, secretResolver WebhookSigningSecretResolver) PostgresSideEffectDispatcher {
+func NewPostgresSideEffectDispatcher(pool *pgxpool.Pool, bookings BookingReader, subscriptions WebhookSubscriptionStore, secretResolver WebhookSigningSecretResolver, transport WebhookAttemptTransport) PostgresSideEffectDispatcher {
 	return PostgresSideEffectDispatcher{
 		pool:           pool,
 		bookings:       bookings,
 		subscriptions:  subscriptions,
 		secretResolver: secretResolver,
+		transport:      transport,
 	}
 }
 
@@ -38,12 +41,8 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 		return fmt.Errorf("invalid planned side effect dispatch record")
 	}
 
-	webhookDelivery, err := d.buildWebhookDelivery(ctx, effect)
-	if err != nil {
-		return err
-	}
-
-	return db.WithTx(ctx, d.pool, func(tx db.Tx) error {
+	pendingAttempts := []WebhookDeliveryAttempt{}
+	if err := db.WithTx(ctx, d.pool, func(tx db.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			insert into booking_side_effect_dispatch_log (side_effect_id, booking_uid, name, request_id)
 			values ($1, $2, $3, $4)
@@ -51,18 +50,104 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 		`, effect.ID, effect.BookingUID, string(effect.Name), effect.RequestID); err != nil {
 			return fmt.Errorf("record side effect dispatch: %w", err)
 		}
+
+		var err error
+		pendingAttempts, err = d.prepareWebhookAttempts(ctx, tx, effect)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	if len(pendingAttempts) == 0 {
+		return nil
+	}
+	if d.transport == nil {
+		return errors.New("webhook dispatch requires a transport")
+	}
+
+	var dispatchErr error
+	for _, attempt := range pendingAttempts {
+		receipt, err := d.transport.DeliverWebhookAttempt(ctx, attempt)
+		statusCode := webhookAttemptStatusCode(receipt, err)
+		if err != nil {
+			if markErr := markWebhookAttemptFailed(ctx, d.pool, attempt.ID, statusCode, err); markErr != nil {
+				return fmt.Errorf("mark webhook attempt failed: %w", markErr)
+			}
+			if dispatchErr == nil {
+				dispatchErr = err
+			}
+			continue
+		}
+		if err := markWebhookAttemptDelivered(ctx, d.pool, attempt.ID, statusCode); err != nil {
+			return fmt.Errorf("mark webhook attempt delivered: %w", err)
+		}
+	}
+	return dispatchErr
+}
+
+func (d PostgresSideEffectDispatcher) prepareWebhookAttempts(ctx context.Context, tx db.Tx, effect PlannedSideEffectRecord) ([]WebhookDeliveryAttempt, error) {
+	if _, ok := webhookTriggerEventForSideEffect(effect.Name); !ok {
+		return nil, nil
+	}
+
+	webhookDelivery, found, err := readWebhookDelivery(ctx, tx, effect.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		webhookDelivery, err = d.buildWebhookDelivery(ctx, effect)
+		if err != nil {
+			return nil, err
+		}
 		if webhookDelivery == nil {
-			return nil
+			return nil, nil
 		}
 		deliveryID, err := upsertWebhookDelivery(ctx, tx, effect, webhookDelivery)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := recordWebhookAttempts(ctx, tx, effect, deliveryID, webhookDelivery); err != nil {
-			return err
+		webhookDelivery.ID = deliveryID
+	}
+
+	attemptCount, err := countWebhookAttempts(ctx, tx, webhookDelivery.ID)
+	if err != nil {
+		return nil, err
+	}
+	if attemptCount == 0 {
+		attempts, err := d.webhookAttemptTemplates(ctx, WebhookTriggerEvent(webhookDelivery.TriggerEvent), webhookDelivery.Body)
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
+		if err := recordWebhookAttempts(ctx, tx, effect, webhookDelivery.ID, webhookDelivery, attempts); err != nil {
+			return nil, err
+		}
+	}
+
+	return readPendingWebhookAttempts(ctx, tx, effect.ID)
+}
+
+type webhookDeliveryRecord struct {
+	ID           int64
+	TriggerEvent string
+	ContentType  string
+	CreatedAt    string
+	Body         string
+}
+
+func readWebhookDelivery(ctx context.Context, tx db.Tx, sideEffectID int64) (*webhookDeliveryRecord, bool, error) {
+	var delivery webhookDeliveryRecord
+	err := tx.QueryRow(ctx, `
+		select id, trigger_event, content_type, created_at_wire, body
+		from booking_webhook_deliveries
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&delivery.ID, &delivery.TriggerEvent, &delivery.ContentType, &delivery.CreatedAt, &delivery.Body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read webhook delivery: %w", err)
+	}
+	return &delivery, true, nil
 }
 
 func upsertWebhookDelivery(ctx context.Context, tx db.Tx, effect PlannedSideEffectRecord, webhookDelivery *webhookDeliveryRecord) (int64, error) {
@@ -95,8 +180,20 @@ func upsertWebhookDelivery(ctx context.Context, tx db.Tx, effect PlannedSideEffe
 	return deliveryID, nil
 }
 
-func recordWebhookAttempts(ctx context.Context, tx db.Tx, effect PlannedSideEffectRecord, deliveryID int64, webhookDelivery *webhookDeliveryRecord) error {
-	for _, attempt := range webhookDelivery.Attempts {
+func countWebhookAttempts(ctx context.Context, tx db.Tx, deliveryID int64) (int, error) {
+	var count int
+	if err := tx.QueryRow(ctx, `
+		select count(*)
+		from booking_webhook_delivery_attempts
+		where delivery_id = $1
+	`, deliveryID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count webhook delivery attempts: %w", err)
+	}
+	return count, nil
+}
+
+func recordWebhookAttempts(ctx context.Context, tx db.Tx, effect PlannedSideEffectRecord, deliveryID int64, webhookDelivery *webhookDeliveryRecord, attempts []WebhookDeliveryAttempt) error {
+	for _, attempt := range attempts {
 		if _, err := tx.Exec(ctx, `
 			insert into booking_webhook_delivery_attempts (
 				delivery_id,
@@ -118,19 +215,94 @@ func recordWebhookAttempts(ctx context.Context, tx db.Tx, effect PlannedSideEffe
 	return nil
 }
 
-type webhookDeliveryRecord struct {
-	TriggerEvent string
-	ContentType  string
-	CreatedAt    string
-	Body         string
-	Attempts     []signedWebhookAttempt
+func readPendingWebhookAttempts(ctx context.Context, tx db.Tx, sideEffectID int64) ([]WebhookDeliveryAttempt, error) {
+	rows, err := tx.Query(ctx, `
+		select id, delivery_id, side_effect_id, subscriber_id, subscriber_url, trigger_event, content_type, signature_header_name, signature_header_value, body
+		from booking_webhook_delivery_attempts
+		where side_effect_id = $1
+			and delivered_at is null
+		order by id
+	`, sideEffectID)
+	if err != nil {
+		return nil, fmt.Errorf("read pending webhook attempts: %w", err)
+	}
+	defer rows.Close()
+
+	attempts := []WebhookDeliveryAttempt{}
+	for rows.Next() {
+		var attempt WebhookDeliveryAttempt
+		if err := rows.Scan(
+			&attempt.ID,
+			&attempt.DeliveryID,
+			&attempt.SideEffectID,
+			&attempt.SubscriberID,
+			&attempt.SubscriberURL,
+			&attempt.TriggerEvent,
+			&attempt.ContentType,
+			&attempt.SignatureHeaderName,
+			&attempt.SignatureHeaderValue,
+			&attempt.Body,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending webhook attempt: %w", err)
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read pending webhook attempt rows: %w", err)
+	}
+	return attempts, nil
 }
 
-type signedWebhookAttempt struct {
-	SubscriberID         int64
-	SubscriberURL        string
-	SignatureHeaderName  string
-	SignatureHeaderValue string
+func markWebhookAttemptDelivered(ctx context.Context, pool *pgxpool.Pool, attemptID int64, statusCode int) error {
+	if pool == nil {
+		return db.ErrNilPool
+	}
+	tag, err := pool.Exec(ctx, `
+		update booking_webhook_delivery_attempts
+		set delivered_at = now(),
+			response_status = $2,
+			last_error = null,
+			last_attempted_at = now(),
+			attempt_count = booking_webhook_delivery_attempts.attempt_count + 1
+		where id = $1
+			and delivered_at is null
+	`, attemptID, nullableStatusCode(statusCode))
+	if err != nil {
+		return fmt.Errorf("update delivered webhook attempt: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("webhook attempt %d was not pending", attemptID)
+	}
+	return nil
+}
+
+func markWebhookAttemptFailed(ctx context.Context, pool *pgxpool.Pool, attemptID int64, statusCode int, dispatchErr error) error {
+	if pool == nil {
+		return db.ErrNilPool
+	}
+	tag, err := pool.Exec(ctx, `
+		update booking_webhook_delivery_attempts
+		set response_status = $2,
+			last_error = $3,
+			last_attempted_at = now(),
+			attempt_count = booking_webhook_delivery_attempts.attempt_count + 1
+		where id = $1
+			and delivered_at is null
+	`, attemptID, nullableStatusCode(statusCode), safeWebhookAttemptError(dispatchErr))
+	if err != nil {
+		return fmt.Errorf("update failed webhook attempt: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("webhook attempt %d was not pending", attemptID)
+	}
+	return nil
+}
+
+func nullableStatusCode(statusCode int) any {
+	if statusCode <= 0 {
+		return nil
+	}
+	return statusCode
 }
 
 func (d PostgresSideEffectDispatcher) buildWebhookDelivery(ctx context.Context, effect PlannedSideEffectRecord) (*webhookDeliveryRecord, error) {
@@ -145,16 +317,11 @@ func (d PostgresSideEffectDispatcher) buildWebhookDelivery(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("encode webhook delivery body: %w", err)
 	}
-	attempts, err := d.webhookAttempts(ctx, envelope.TriggerEvent, string(bodyRaw))
-	if err != nil {
-		return nil, err
-	}
 	return &webhookDeliveryRecord{
 		TriggerEvent: string(envelope.TriggerEvent),
 		ContentType:  "application/json",
 		CreatedAt:    envelope.CreatedAt,
 		Body:         string(bodyRaw),
-		Attempts:     attempts,
 	}, nil
 }
 
@@ -178,7 +345,7 @@ func (d PostgresSideEffectDispatcher) webhookEnvelope(ctx context.Context, effec
 	return envelope, ok, nil
 }
 
-func (d PostgresSideEffectDispatcher) webhookAttempts(ctx context.Context, triggerEvent WebhookTriggerEvent, body string) ([]signedWebhookAttempt, error) {
+func (d PostgresSideEffectDispatcher) webhookAttemptTemplates(ctx context.Context, triggerEvent WebhookTriggerEvent, body string) ([]WebhookDeliveryAttempt, error) {
 	if d.subscriptions == nil {
 		return nil, errors.New("webhook dispatch requires a subscription store")
 	}
@@ -191,7 +358,7 @@ func (d PostgresSideEffectDispatcher) webhookAttempts(ctx context.Context, trigg
 		return nil, fmt.Errorf("read webhook subscriptions: %w", err)
 	}
 
-	attempts := make([]signedWebhookAttempt, 0, len(subscriptions))
+	attempts := make([]WebhookDeliveryAttempt, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
 		secret, ok, err := d.secretResolver.ResolveWebhookSigningSecret(ctx, subscription.SigningKeyRef)
 		if err != nil {
@@ -204,11 +371,14 @@ func (d PostgresSideEffectDispatcher) webhookAttempts(ctx context.Context, trigg
 		if err != nil {
 			return nil, err
 		}
-		attempts = append(attempts, signedWebhookAttempt{
+		attempts = append(attempts, WebhookDeliveryAttempt{
 			SubscriberID:         subscription.ID,
 			SubscriberURL:        subscription.SubscriberURL,
+			TriggerEvent:         string(subscription.TriggerEvent),
+			ContentType:          "application/json",
 			SignatureHeaderName:  webhookSignatureHeaderName,
 			SignatureHeaderValue: signatureValue,
+			Body:                 body,
 		})
 	}
 	return attempts, nil

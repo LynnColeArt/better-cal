@@ -50,6 +50,7 @@ func main() {
 		booking.NewFixtureWebhookSigningSecretResolver(map[string]string{
 			cfg.WebhookSigningKeyRef: cfg.WebhookSigningSecret,
 		}),
+		booking.NewHTTPWebhookTransport(nil),
 	)
 	worker := booking.NewSideEffectWorker(repository, dispatcher)
 	result, err := worker.RunOnce(ctx, 25)

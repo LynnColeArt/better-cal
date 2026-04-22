@@ -15,7 +15,7 @@ services:
       CALDIY_OAUTH_CLIENT_ID: mock-oauth-client
       CALDIY_PLATFORM_CLIENT_ID: mock-platform-client
       CALDIY_PLATFORM_CLIENT_SECRET: mock-platform-secret
-      CALDIY_WEBHOOK_SUBSCRIBER_URL: https://example.invalid/caldiy/webhook
+      CALDIY_WEBHOOK_SUBSCRIBER_URL: http://webhook-sink:8090/caldiy/webhook
       CALDIY_WEBHOOK_SIGNING_KEY_REF: fixture-booking-webhook
       CALDIY_WEBHOOK_SIGNING_SECRET: mock-webhook-signing-secret
       CALDIY_REQUEST_ID: mock-request-id
@@ -24,6 +24,8 @@ services:
       - "8080:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      webhook-sink:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
@@ -39,13 +41,31 @@ services:
     profiles: ["worker"]
     environment:
       CALDIY_DATABASE_URL: postgres://better_cal:better_cal_dev@postgres:5432/better_cal?sslmode=disable
-      CALDIY_WEBHOOK_SUBSCRIBER_URL: https://example.invalid/caldiy/webhook
+      CALDIY_WEBHOOK_SUBSCRIBER_URL: http://webhook-sink:8090/caldiy/webhook
       CALDIY_WEBHOOK_SIGNING_KEY_REF: fixture-booking-webhook
       CALDIY_WEBHOOK_SIGNING_SECRET: mock-webhook-signing-secret
     depends_on:
       postgres:
         condition: service_healthy
+      webhook-sink:
+        condition: service_healthy
     restart: "no"
+
+  webhook-sink:
+    image: better-cal-backend
+    build: *backend-build
+    command: ["better-cal-webhook-sink"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8090
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
 
   postgres:
     image: postgres:16-alpine

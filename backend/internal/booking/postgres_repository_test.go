@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -356,9 +360,25 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	repo := NewPostgresRepository(pool)
 	subscriptionStore := NewPostgresWebhookSubscriptionStore(pool)
 	uid := fmt.Sprintf("repo-side-effect-dispatch-%d", time.Now().UnixNano())
-	subscriberURL := "https://example.invalid/" + uid
 	signingKeyRef := "dispatch-key-ref"
 	signingSecret := "dispatch-signing-secret"
+	var requestCount atomic.Int32
+	var capturedBody atomic.Value
+	var capturedSignature atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		bodyRaw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read error", http.StatusInternalServerError)
+			return
+		}
+		capturedBody.Store(string(bodyRaw))
+		capturedSignature.Store(r.Header.Get(webhookSignatureHeaderName))
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	subscriberURL := server.URL + "/caldiy/webhook"
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -406,6 +426,7 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 		NewFixtureWebhookSigningSecretResolver(map[string]string{
 			signingKeyRef: signingSecret,
 		}),
+		NewHTTPWebhookTransport(server.Client()),
 	)
 	record := PlannedSideEffectRecord{
 		ID:         sideEffectID,
@@ -436,6 +457,9 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	}
 	if dispatchRows != 1 {
 		t.Fatalf("dispatch rows = %d, want 1", dispatchRows)
+	}
+	if got := requestCount.Load(); got != 1 {
+		t.Fatalf("webhook requests = %d, want 1", got)
 	}
 
 	var triggerEvent string
@@ -494,11 +518,15 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	var signatureHeaderName string
 	var signatureHeaderValue string
 	var attemptBody string
+	var attemptResponseStatus int
+	var attemptCount int
+	var delivered bool
+	var attemptLastError string
 	if err := pool.QueryRow(ctx, `
-		select count(*), min(subscriber_url), min(trigger_event), min(content_type), min(signature_header_name), min(signature_header_value), min(body)
+		select count(*), min(subscriber_url), min(trigger_event), min(content_type), min(signature_header_name), min(signature_header_value), min(body), min(coalesce(response_status, 0)), min(attempt_count), bool_and(delivered_at is not null), min(coalesce(last_error, ''))
 		from booking_webhook_delivery_attempts
 		where side_effect_id = $1
-	`, sideEffectID).Scan(&attemptRows, &attemptSubscriberURL, &attemptTriggerEvent, &attemptContentType, &signatureHeaderName, &signatureHeaderValue, &attemptBody); err != nil {
+	`, sideEffectID).Scan(&attemptRows, &attemptSubscriberURL, &attemptTriggerEvent, &attemptContentType, &signatureHeaderName, &signatureHeaderValue, &attemptBody, &attemptResponseStatus, &attemptCount, &delivered, &attemptLastError); err != nil {
 		t.Fatal(err)
 	}
 	if attemptRows != 1 {
@@ -523,6 +551,18 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	if signatureHeaderValue != expectedSignature {
 		t.Fatalf("signature header value = %q, want %q", signatureHeaderValue, expectedSignature)
 	}
+	if attemptResponseStatus != http.StatusAccepted {
+		t.Fatalf("attempt response status = %d", attemptResponseStatus)
+	}
+	if attemptCount != 1 {
+		t.Fatalf("attempt count = %d, want 1", attemptCount)
+	}
+	if !delivered {
+		t.Fatal("expected delivered webhook attempt")
+	}
+	if attemptLastError != "" {
+		t.Fatalf("attempt last_error = %q", attemptLastError)
+	}
 
 	var attemptEnvelope WebhookDeliveryEnvelope
 	if err := json.Unmarshal([]byte(attemptBody), &attemptEnvelope); err != nil {
@@ -536,6 +576,155 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	}
 	if attemptEnvelope.Payload.CancellationReason != envelope.Payload.CancellationReason {
 		t.Fatalf("attempt cancellation reason = %q", attemptEnvelope.Payload.CancellationReason)
+	}
+	if got, _ := capturedBody.Load().(string); got != attemptBody {
+		t.Fatalf("captured webhook body = %q", got)
+	}
+	if got, _ := capturedSignature.Load().(string); got != signatureHeaderValue {
+		t.Fatalf("captured webhook signature = %q", got)
+	}
+}
+
+func TestPostgresSideEffectDispatcherRetriesFailedWebhookAttempt(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	subscriptionStore := NewPostgresWebhookSubscriptionStore(pool)
+	uid := fmt.Sprintf("repo-side-effect-retry-%d", time.Now().UnixNano())
+	signingKeyRef := "retry-key-ref"
+	signingSecret := "retry-signing-secret"
+	var requestCount atomic.Int32
+	var responseStatus atomic.Int32
+	responseStatus.Store(http.StatusBadGateway)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount.Add(1)
+		w.WriteHeader(int(responseStatus.Load()))
+	}))
+	defer server.Close()
+
+	subscriberURL := server.URL + "/caldiy/webhook"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_delivery_attempts where subscriber_url = $1`, subscriberURL)
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled))
+	})
+	if _, err := pool.Exec(ctx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled)); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedWebhookSubscriptions(ctx, subscriptionStore, FixtureWebhookSubscriptions(subscriberURL, signingKeyRef)); err != nil {
+		t.Fatal(err)
+	}
+
+	bookingValue := repositoryTestBooking(uid, "retry-request")
+	bookingValue.Status = "cancelled"
+	if err := repo.Save(ctx, []PlannedSideEffect{
+		{
+			Name:       SideEffectWebhookBookingCancelled,
+			BookingUID: uid,
+			RequestID:  "retry-request",
+			Payload: map[string]any{
+				"cancellationReason": "retry fixture cancellation",
+			},
+		},
+	}, bookingValue); err != nil {
+		t.Fatal(err)
+	}
+
+	var sideEffectID int64
+	if err := pool.QueryRow(ctx, `
+		select id
+		from booking_planned_side_effects
+		where booking_uid = $1
+	`, uid).Scan(&sideEffectID); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := NewPostgresSideEffectDispatcher(
+		pool,
+		repo,
+		subscriptionStore,
+		NewFixtureWebhookSigningSecretResolver(map[string]string{
+			signingKeyRef: signingSecret,
+		}),
+		NewHTTPWebhookTransport(server.Client()),
+	)
+	record := PlannedSideEffectRecord{
+		ID:         sideEffectID,
+		Name:       SideEffectWebhookBookingCancelled,
+		BookingUID: uid,
+		RequestID:  "retry-request",
+		Payload: map[string]any{
+			"cancellationReason": "retry fixture cancellation",
+		},
+	}
+
+	err := dispatcher.Dispatch(ctx, record)
+	if err == nil {
+		t.Fatal("expected initial dispatch failure")
+	}
+	if err.Error() != "webhook delivery returned status 502" {
+		t.Fatalf("dispatch error = %q", err)
+	}
+
+	var firstAttemptCount int
+	var firstResponseStatus int
+	var firstLastError string
+	var firstDelivered bool
+	if err := pool.QueryRow(ctx, `
+		select min(attempt_count), min(coalesce(response_status, 0)), min(coalesce(last_error, '')), bool_and(delivered_at is not null)
+		from booking_webhook_delivery_attempts
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&firstAttemptCount, &firstResponseStatus, &firstLastError, &firstDelivered); err != nil {
+		t.Fatal(err)
+	}
+	if firstAttemptCount != 1 {
+		t.Fatalf("first attempt count = %d", firstAttemptCount)
+	}
+	if firstResponseStatus != http.StatusBadGateway {
+		t.Fatalf("first response status = %d", firstResponseStatus)
+	}
+	if firstLastError != "webhook delivery returned status 502" {
+		t.Fatalf("first last_error = %q", firstLastError)
+	}
+	if firstDelivered {
+		t.Fatal("unexpected delivered webhook attempt after failed transport")
+	}
+
+	responseStatus.Store(http.StatusAccepted)
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if got := requestCount.Load(); got != 2 {
+		t.Fatalf("webhook requests = %d, want 2", got)
+	}
+
+	var finalAttemptCount int
+	var finalResponseStatus int
+	var finalLastError string
+	var finalDelivered bool
+	if err := pool.QueryRow(ctx, `
+		select min(attempt_count), min(coalesce(response_status, 0)), min(coalesce(last_error, '')), bool_and(delivered_at is not null)
+		from booking_webhook_delivery_attempts
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&finalAttemptCount, &finalResponseStatus, &finalLastError, &finalDelivered); err != nil {
+		t.Fatal(err)
+	}
+	if finalAttemptCount != 2 {
+		t.Fatalf("final attempt count = %d", finalAttemptCount)
+	}
+	if finalResponseStatus != http.StatusAccepted {
+		t.Fatalf("final response status = %d", finalResponseStatus)
+	}
+	if finalLastError != "" {
+		t.Fatalf("final last_error = %q", finalLastError)
+	}
+	if !finalDelivered {
+		t.Fatal("expected delivered webhook attempt after retry")
 	}
 }
 
