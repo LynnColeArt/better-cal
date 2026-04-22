@@ -111,6 +111,7 @@ Booking:
 - booking write rolls back if planned side-effect persistence fails;
 - booking side-effect dispatch failures remain retryable without storing raw provider error details;
 - booking dispatch logs contain only side-effect ids, names, booking ids, request ids, and timestamps;
+- booking queued webhook payload hints contain only contract fields needed for retry-safe delivery reconstruction;
 - booking cancel by unauthorized user;
 - booking reschedule by unauthorized user;
 - booking side-effect retry does not duplicate provider events, emails, webhooks, or payments.

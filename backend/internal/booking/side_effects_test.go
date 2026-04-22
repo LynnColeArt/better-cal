@@ -162,6 +162,39 @@ func TestSideEffectPlanningFailurePreventsStateTransition(t *testing.T) {
 	}
 }
 
+func TestFixtureSideEffectPortPersistsWebhookPayloadHints(t *testing.T) {
+	port := FixtureSideEffectPort{}
+
+	cancelled, err := port.PlanBookingCancelled(context.Background(), BookingCancelledSideEffect{
+		Booking:            BookingSideEffectSnapshot{UID: PrimaryFixtureUID, RequestID: "cancel-request"},
+		CancellationReason: "Fixture cancellation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPayloadValue(t, cancelled[2].Payload, "cancellationReason", "Fixture cancellation")
+
+	rescheduled, err := port.PlanBookingRescheduled(context.Background(), BookingRescheduledSideEffect{
+		OldBooking:         BookingSideEffectSnapshot{UID: PrimaryFixtureUID},
+		NewBooking:         BookingSideEffectSnapshot{UID: RescheduledFixtureUID, RequestID: "reschedule-request"},
+		ReschedulingReason: "Fixture reschedule",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPayloadValue(t, rescheduled[2].Payload, "rescheduleUid", PrimaryFixtureUID)
+	assertPayloadValue(t, rescheduled[2].Payload, "reschedulingReason", "Fixture reschedule")
+
+	declined, err := port.PlanBookingDeclined(context.Background(), BookingDeclinedSideEffect{
+		Booking: BookingSideEffectSnapshot{UID: PendingDeclineFixtureUID, RequestID: "decline-request"},
+		Reason:  "Fixture decline",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPayloadValue(t, declined[1].Payload, "reason", "Fixture decline")
+}
+
 func assertStringSlice(t *testing.T, actual []string, expected []string) {
 	t.Helper()
 	if !reflect.DeepEqual(actual, expected) {
@@ -176,6 +209,14 @@ func assertSideEffectSnapshotIsSecretFree(t *testing.T, snapshot BookingSideEffe
 		if _, ok := snapshotType.FieldByName(fieldName); ok {
 			t.Fatalf("side-effect snapshot exposes %s", fieldName)
 		}
+	}
+}
+
+func assertPayloadValue(t *testing.T, payload map[string]any, key string, expected string) {
+	t.Helper()
+	value, _ := payload[key].(string)
+	if value != expected {
+		t.Fatalf("payload[%q] = %q, want %q", key, value, expected)
 	}
 }
 
@@ -195,7 +236,7 @@ func (p *capturingSideEffectPort) PlanBookingCancelled(_ context.Context, event 
 	return []PlannedSideEffect{
 		{Name: SideEffectCalendarCancelled, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
 		{Name: SideEffectEmailCancelled, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
-		{Name: SideEffectWebhookBookingCancelled, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectWebhookBookingCancelled, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID, Payload: map[string]any{"cancellationReason": event.CancellationReason}},
 	}, nil
 }
 
@@ -207,7 +248,7 @@ func (p *capturingSideEffectPort) PlanBookingRescheduled(_ context.Context, even
 	return []PlannedSideEffect{
 		{Name: SideEffectCalendarRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
 		{Name: SideEffectEmailRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
-		{Name: SideEffectWebhookBookingRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
+		{Name: SideEffectWebhookBookingRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID, Payload: map[string]any{"rescheduleUid": event.OldBooking.UID, "reschedulingReason": event.ReschedulingReason}},
 	}, nil
 }
 
@@ -218,7 +259,7 @@ func (p *capturingSideEffectPort) PlanBookingConfirmed(_ context.Context, event 
 	}
 	return []PlannedSideEffect{
 		{Name: SideEffectEmailConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
-		{Name: SideEffectWebhookBookingConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectWebhookBookingConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID, Payload: map[string]any{}},
 	}, nil
 }
 
@@ -229,6 +270,6 @@ func (p *capturingSideEffectPort) PlanBookingDeclined(_ context.Context, event B
 	}
 	return []PlannedSideEffect{
 		{Name: SideEffectEmailDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
-		{Name: SideEffectWebhookBookingDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectWebhookBookingDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID, Payload: map[string]any{"reason": event.Reason}},
 	}, nil
 }

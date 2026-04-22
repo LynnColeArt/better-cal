@@ -223,7 +223,14 @@ func TestPostgresRepositoryClaimsAndMarksPlannedSideEffects(t *testing.T) {
 
 	if err := repo.Save(ctx, []PlannedSideEffect{
 		{Name: SideEffectEmailCancelled, BookingUID: uid, RequestID: "claim-request"},
-		{Name: SideEffectWebhookBookingCancelled, BookingUID: uid, RequestID: "claim-request"},
+		{
+			Name:       SideEffectWebhookBookingCancelled,
+			BookingUID: uid,
+			RequestID:  "claim-request",
+			Payload: map[string]any{
+				"cancellationReason": "claim fixture cancellation",
+			},
+		},
 	}, repositoryTestBooking(uid, "claim-request")); err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +251,9 @@ func TestPostgresRepositoryClaimsAndMarksPlannedSideEffects(t *testing.T) {
 		}
 		if record.Attempts != 1 {
 			t.Fatalf("claimed attempts = %d, want 1", record.Attempts)
+		}
+		if record.Name == SideEffectWebhookBookingCancelled {
+			assertPayloadField(t, record.Payload, "cancellationReason", "claim fixture cancellation")
 		}
 	}
 
@@ -352,9 +362,19 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
 	})
 
+	bookingValue := repositoryTestBooking(uid, "dispatch-request")
+	bookingValue.Status = "cancelled"
+	bookingValue.UpdatedAt = "2026-01-01T00:05:00.000Z"
 	if err := repo.Save(ctx, []PlannedSideEffect{
-		{Name: SideEffectEmailCancelled, BookingUID: uid, RequestID: "dispatch-request"},
-	}, repositoryTestBooking(uid, "dispatch-request")); err != nil {
+		{
+			Name:       SideEffectWebhookBookingCancelled,
+			BookingUID: uid,
+			RequestID:  "dispatch-request",
+			Payload: map[string]any{
+				"cancellationReason": "dispatch fixture cancellation",
+			},
+		},
+	}, bookingValue); err != nil {
 		t.Fatal(err)
 	}
 
@@ -367,12 +387,15 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dispatcher := NewPostgresSideEffectDispatcher(pool)
+	dispatcher := NewPostgresSideEffectDispatcher(pool, repo)
 	record := PlannedSideEffectRecord{
 		ID:         sideEffectID,
-		Name:       SideEffectEmailCancelled,
+		Name:       SideEffectWebhookBookingCancelled,
 		BookingUID: uid,
 		RequestID:  "dispatch-request",
+		Payload: map[string]any{
+			"cancellationReason": "dispatch fixture cancellation",
+		},
 	}
 	if err := dispatcher.Dispatch(ctx, record); err != nil {
 		t.Fatal(err)
@@ -389,11 +412,60 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 			and booking_uid = $2
 			and name = $3
 			and request_id = $4
-	`, sideEffectID, uid, string(SideEffectEmailCancelled), "dispatch-request").Scan(&dispatchRows); err != nil {
+	`, sideEffectID, uid, string(SideEffectWebhookBookingCancelled), "dispatch-request").Scan(&dispatchRows); err != nil {
 		t.Fatal(err)
 	}
 	if dispatchRows != 1 {
 		t.Fatalf("dispatch rows = %d, want 1", dispatchRows)
+	}
+
+	var triggerEvent string
+	var contentType string
+	var createdAtWire string
+	var bodyRaw []byte
+	if err := pool.QueryRow(ctx, `
+		select trigger_event, content_type, created_at_wire, body
+		from booking_webhook_deliveries
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&triggerEvent, &contentType, &createdAtWire, &bodyRaw); err != nil {
+		t.Fatal(err)
+	}
+	if triggerEvent != string(WebhookTriggerBookingCancelled) {
+		t.Fatalf("trigger event = %q", triggerEvent)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content type = %q", contentType)
+	}
+	if createdAtWire != bookingValue.UpdatedAt {
+		t.Fatalf("created_at_wire = %q, want %q", createdAtWire, bookingValue.UpdatedAt)
+	}
+
+	var envelope WebhookDeliveryEnvelope
+	if err := json.Unmarshal(bodyRaw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.TriggerEvent != WebhookTriggerBookingCancelled {
+		t.Fatalf("envelope trigger event = %q", envelope.TriggerEvent)
+	}
+	if envelope.Payload.UID != uid {
+		t.Fatalf("envelope payload uid = %q", envelope.Payload.UID)
+	}
+	if envelope.Payload.CancellationReason != "dispatch fixture cancellation" {
+		t.Fatalf("envelope cancellation reason = %q", envelope.Payload.CancellationReason)
+	}
+
+	var rawBody map[string]any
+	if err := json.Unmarshal(bodyRaw, &rawBody); err != nil {
+		t.Fatal(err)
+	}
+	payloadValue, _ := rawBody["payload"].(map[string]any)
+	attendeesValue, _ := payloadValue["attendees"].([]any)
+	if len(attendeesValue) == 0 {
+		t.Fatal("expected webhook attendees")
+	}
+	firstAttendee, _ := attendeesValue[0].(map[string]any)
+	if _, ok := firstAttendee["id"]; ok {
+		t.Fatal("webhook attendee exposed internal id")
 	}
 }
 
@@ -570,5 +642,13 @@ func assertPlannedSideEffectRows(t *testing.T, ctx context.Context, pool *pgxpoo
 	}
 	if count != expected {
 		t.Fatalf("planned side-effect row count = %d, want %d", count, expected)
+	}
+}
+
+func assertPayloadField(t *testing.T, payload map[string]any, key string, expected string) {
+	t.Helper()
+	value, _ := payload[key].(string)
+	if value != expected {
+		t.Fatalf("payload[%q] = %q, want %q", key, value, expected)
 	}
 }

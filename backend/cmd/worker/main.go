@@ -38,7 +38,7 @@ func main() {
 	}
 
 	repository := booking.NewPostgresRepository(pool)
-	dispatcher := booking.NewPostgresSideEffectDispatcher(pool)
+	dispatcher := booking.NewPostgresSideEffectDispatcher(pool, repository)
 	worker := booking.NewSideEffectWorker(repository, dispatcher)
 	result, err := worker.RunOnce(ctx, 25)
 	if err != nil {

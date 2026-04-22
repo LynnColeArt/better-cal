@@ -225,6 +225,7 @@ func (r *PostgresRepository) ClaimPlannedSideEffects(ctx context.Context, limit 
 				side_effect.name,
 				side_effect.booking_uid,
 				side_effect.request_id,
+				side_effect.payload,
 				side_effect.attempts,
 				side_effect.status
 		`, limit)
@@ -236,10 +237,15 @@ func (r *PostgresRepository) ClaimPlannedSideEffects(ctx context.Context, limit 
 		for rows.Next() {
 			var record PlannedSideEffectRecord
 			var name string
-			if err := rows.Scan(&record.ID, &name, &record.BookingUID, &record.RequestID, &record.Attempts, &record.Status); err != nil {
+			var payloadRaw []byte
+			if err := rows.Scan(&record.ID, &name, &record.BookingUID, &record.RequestID, &payloadRaw, &record.Attempts, &record.Status); err != nil {
 				return fmt.Errorf("scan planned side effect: %w", err)
 			}
 			record.Name = SideEffectName(name)
+			record.Payload, err = decodeObject(payloadRaw, "planned side effect payload")
+			if err != nil {
+				return err
+			}
 			records = append(records, record)
 		}
 		if err := rows.Err(); err != nil {
@@ -375,11 +381,15 @@ func savePlannedSideEffects(ctx context.Context, tx db.Tx, effects []PlannedSide
 		if effect.Name == "" || effect.BookingUID == "" || effect.RequestID == "" {
 			return fmt.Errorf("invalid planned side effect")
 		}
+		payloadRaw, err := json.Marshal(objectOrEmpty(effect.Payload))
+		if err != nil {
+			return fmt.Errorf("encode planned side effect payload: %w", err)
+		}
 		if _, err := tx.Exec(ctx, `
-			insert into booking_planned_side_effects (booking_uid, name, request_id)
-			values ($1, $2, $3)
+			insert into booking_planned_side_effects (booking_uid, name, request_id, payload)
+			values ($1, $2, $3, $4)
 			on conflict (booking_uid, name, request_id) do nothing
-		`, effect.BookingUID, string(effect.Name), effect.RequestID); err != nil {
+		`, effect.BookingUID, string(effect.Name), effect.RequestID, string(payloadRaw)); err != nil {
 			return fmt.Errorf("save planned side effect: %w", err)
 		}
 	}

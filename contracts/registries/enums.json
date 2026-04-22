@@ -45,8 +45,8 @@
     },
     {
       "id": "enum.webhook.triggerEvent",
-      "status": "needs-capture",
-      "values": []
+      "status": "draft",
+      "values": ["BOOKING_RESCHEDULED", "BOOKING_CANCELLED", "BOOKING_CONFIRMED", "BOOKING_REJECTED"]
     },
     {
       "id": "enum.location.type",

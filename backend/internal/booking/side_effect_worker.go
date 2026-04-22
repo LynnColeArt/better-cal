@@ -13,6 +13,7 @@ type PlannedSideEffectRecord struct {
 	Name       SideEffectName
 	BookingUID string
 	RequestID  string
+	Payload    map[string]any
 	Attempts   int
 	Status     string
 }
