@@ -13,7 +13,7 @@ These controls exist to make sure the replacement does not repeat known unsafe p
 | SR-005 | OAuth codes and refresh tokens are replay-safe. | Concurrent exchange tests, replay fixtures, expiry fixtures, and revocation fixtures. |
 | SR-006 | Cron and job trigger credentials are not accepted in query strings. | Route tests for query credential rejection and signed-header success. |
 | SR-007 | Logs, traces, metrics, errors, and fixtures redact secret-bearing fields. | Redaction tests with realistic payloads and fixture secret scanner. |
-| SR-008 | Webhook verification and signing use the exact bytes and secrets intended by the public contract. | Raw-body inbound tests and outbound signature fixtures. |
+| SR-008 | Webhook verification and signing use the exact bytes and secrets intended by the public contract, with signing secrets resolved outside subscriber persistence. | Raw-body inbound tests, outbound signature fixtures, and persistence checks for key-ref-only storage. |
 | SR-009 | Booking writes are transactional, idempotent, and authorization-checked before side effects. | State transition tests, retry tests, and provider mock assertions. |
 | SR-010 | API responses are allowlisted DTOs, not raw database or provider objects. | Response schema review and sensitive-field tests. |
 
@@ -112,6 +112,8 @@ Booking:
 - booking side-effect dispatch failures remain retryable without storing raw provider error details;
 - booking dispatch logs contain only side-effect ids, names, booking ids, request ids, and timestamps;
 - booking queued webhook payload hints contain only contract fields needed for retry-safe delivery reconstruction;
+- booking webhook subscriptions select only active subscribers for the matching trigger event;
+- booking webhook signing secrets never appear in subscription, delivery, or attempt tables and are resolved only through key refs at dispatch time;
 - booking cancel by unauthorized user;
 - booking reschedule by unauthorized user;
 - booking side-effect retry does not duplicate provider events, emails, webhooks, or payments.

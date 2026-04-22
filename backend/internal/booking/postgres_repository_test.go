@@ -354,13 +354,25 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	defer cancel()
 
 	repo := NewPostgresRepository(pool)
+	subscriptionStore := NewPostgresWebhookSubscriptionStore(pool)
 	uid := fmt.Sprintf("repo-side-effect-dispatch-%d", time.Now().UnixNano())
+	subscriberURL := "https://example.invalid/" + uid
+	signingKeyRef := "dispatch-key-ref"
+	signingSecret := "dispatch-signing-secret"
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_delivery_attempts where subscriber_url = $1`, subscriberURL)
 		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
 		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled))
 	})
+	if _, err := pool.Exec(ctx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled)); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedWebhookSubscriptions(ctx, subscriptionStore, FixtureWebhookSubscriptions(subscriberURL, signingKeyRef)); err != nil {
+		t.Fatal(err)
+	}
 
 	bookingValue := repositoryTestBooking(uid, "dispatch-request")
 	bookingValue.Status = "cancelled"
@@ -387,7 +399,14 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dispatcher := NewPostgresSideEffectDispatcher(pool, repo)
+	dispatcher := NewPostgresSideEffectDispatcher(
+		pool,
+		repo,
+		subscriptionStore,
+		NewFixtureWebhookSigningSecretResolver(map[string]string{
+			signingKeyRef: signingSecret,
+		}),
+	)
 	record := PlannedSideEffectRecord{
 		ID:         sideEffectID,
 		Name:       SideEffectWebhookBookingCancelled,
@@ -466,6 +485,120 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	firstAttendee, _ := attendeesValue[0].(map[string]any)
 	if _, ok := firstAttendee["id"]; ok {
 		t.Fatal("webhook attendee exposed internal id")
+	}
+
+	var attemptRows int
+	var attemptSubscriberURL string
+	var attemptTriggerEvent string
+	var attemptContentType string
+	var signatureHeaderName string
+	var signatureHeaderValue string
+	var attemptBody string
+	if err := pool.QueryRow(ctx, `
+		select count(*), min(subscriber_url), min(trigger_event), min(content_type), min(signature_header_name), min(signature_header_value), min(body)
+		from booking_webhook_delivery_attempts
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&attemptRows, &attemptSubscriberURL, &attemptTriggerEvent, &attemptContentType, &signatureHeaderName, &signatureHeaderValue, &attemptBody); err != nil {
+		t.Fatal(err)
+	}
+	if attemptRows != 1 {
+		t.Fatalf("attempt rows = %d, want 1", attemptRows)
+	}
+	if attemptSubscriberURL != subscriberURL {
+		t.Fatalf("attempt subscriber url = %q", attemptSubscriberURL)
+	}
+	if attemptTriggerEvent != string(WebhookTriggerBookingCancelled) {
+		t.Fatalf("attempt trigger event = %q", attemptTriggerEvent)
+	}
+	if attemptContentType != "application/json" {
+		t.Fatalf("attempt content type = %q", attemptContentType)
+	}
+	if signatureHeaderName != webhookSignatureHeaderName {
+		t.Fatalf("signature header name = %q", signatureHeaderName)
+	}
+	expectedSignature, err := signWebhookBody(attemptBody, signingSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signatureHeaderValue != expectedSignature {
+		t.Fatalf("signature header value = %q, want %q", signatureHeaderValue, expectedSignature)
+	}
+
+	var attemptEnvelope WebhookDeliveryEnvelope
+	if err := json.Unmarshal([]byte(attemptBody), &attemptEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if attemptEnvelope.TriggerEvent != envelope.TriggerEvent {
+		t.Fatalf("attempt trigger event = %q", attemptEnvelope.TriggerEvent)
+	}
+	if attemptEnvelope.Payload.UID != envelope.Payload.UID {
+		t.Fatalf("attempt payload uid = %q", attemptEnvelope.Payload.UID)
+	}
+	if attemptEnvelope.Payload.CancellationReason != envelope.Payload.CancellationReason {
+		t.Fatalf("attempt cancellation reason = %q", attemptEnvelope.Payload.CancellationReason)
+	}
+}
+
+func TestPostgresWebhookSubscriptionStoreReadsActiveSubscribersByTrigger(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	store := NewPostgresWebhookSubscriptionStore(pool)
+	prefix := fmt.Sprintf("https://example.invalid/subscription-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled))
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingConfirmed))
+	})
+	if _, err := pool.Exec(ctx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingConfirmed)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SaveWebhookSubscription(ctx, WebhookSubscription{
+		SubscriberURL: prefix + "-cancelled-active",
+		TriggerEvent:  WebhookTriggerBookingCancelled,
+		SigningKeyRef: "cancelled-active",
+		Active:        true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveWebhookSubscription(ctx, WebhookSubscription{
+		SubscriberURL: prefix + "-cancelled-inactive",
+		TriggerEvent:  WebhookTriggerBookingCancelled,
+		SigningKeyRef: "cancelled-inactive",
+		Active:        false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveWebhookSubscription(ctx, WebhookSubscription{
+		SubscriberURL: prefix + "-confirmed-active",
+		TriggerEvent:  WebhookTriggerBookingConfirmed,
+		SigningKeyRef: "confirmed-active",
+		Active:        true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	subscriptions, err := store.ReadWebhookSubscriptionsByTrigger(ctx, WebhookTriggerBookingCancelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subscriptions) != 1 {
+		t.Fatalf("subscriptions = %d, want 1", len(subscriptions))
+	}
+	if subscriptions[0].SubscriberURL != prefix+"-cancelled-active" {
+		t.Fatalf("subscriber url = %q", subscriptions[0].SubscriberURL)
+	}
+	if subscriptions[0].TriggerEvent != WebhookTriggerBookingCancelled {
+		t.Fatalf("trigger event = %q", subscriptions[0].TriggerEvent)
+	}
+	if subscriptions[0].SigningKeyRef != "cancelled-active" {
+		t.Fatalf("signing key ref = %q", subscriptions[0].SigningKeyRef)
 	}
 }
 

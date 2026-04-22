@@ -38,7 +38,19 @@ func main() {
 	}
 
 	repository := booking.NewPostgresRepository(pool)
-	dispatcher := booking.NewPostgresSideEffectDispatcher(pool, repository)
+	webhookSubscriptionStore := booking.NewPostgresWebhookSubscriptionStore(pool)
+	if err := booking.SeedWebhookSubscriptions(ctx, webhookSubscriptionStore, booking.FixtureWebhookSubscriptions(cfg.WebhookSubscriberURL, cfg.WebhookSigningKeyRef)); err != nil {
+		slog.Error("webhook subscription seed failed", "error", err)
+		os.Exit(1)
+	}
+	dispatcher := booking.NewPostgresSideEffectDispatcher(
+		pool,
+		repository,
+		webhookSubscriptionStore,
+		booking.NewFixtureWebhookSigningSecretResolver(map[string]string{
+			cfg.WebhookSigningKeyRef: cfg.WebhookSigningSecret,
+		}),
+	)
 	worker := booking.NewSideEffectWorker(repository, dispatcher)
 	result, err := worker.RunOnce(ctx, 25)
 	if err != nil {

@@ -66,6 +66,12 @@ func main() {
 			slog.Error("slot availability seed failed", "error", err)
 			os.Exit(1)
 		}
+		webhookSubscriptionStore := booking.NewPostgresWebhookSubscriptionStore(pool)
+		if err := booking.SeedWebhookSubscriptions(ctx, webhookSubscriptionStore, booking.FixtureWebhookSubscriptions(cfg.WebhookSubscriberURL, cfg.WebhookSigningKeyRef)); err != nil {
+			cancel()
+			slog.Error("webhook subscription seed failed", "error", err)
+			os.Exit(1)
+		}
 		slotService = slots.NewService(
 			slots.WithRepository(slotRepository),
 			slots.WithBusyTimeProvider(slotRepository),
