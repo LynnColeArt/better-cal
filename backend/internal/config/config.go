@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 const (
 	defaultAPIKey               = "cal_test_valid_mock"
@@ -10,6 +13,7 @@ const (
 	defaultWebhookSubscriberURL = "https://example.invalid/caldiy/webhook"
 	defaultWebhookSigningKeyRef = "fixture-booking-webhook"
 	defaultWebhookSigningSecret = "mock-webhook-signing-secret"
+	defaultWebhookMaxAttempts   = 3
 	defaultRequestID            = "mock-request-id"
 )
 
@@ -23,6 +27,7 @@ type Config struct {
 	WebhookSubscriberURL string
 	WebhookSigningKeyRef string
 	WebhookSigningSecret string
+	WebhookMaxAttempts   int
 	RequestID            string
 }
 
@@ -44,6 +49,7 @@ func FromEnv() Config {
 		WebhookSubscriberURL: env("CALDIY_WEBHOOK_SUBSCRIBER_URL", defaultWebhookSubscriberURL),
 		WebhookSigningKeyRef: env("CALDIY_WEBHOOK_SIGNING_KEY_REF", defaultWebhookSigningKeyRef),
 		WebhookSigningSecret: env("CALDIY_WEBHOOK_SIGNING_SECRET", defaultWebhookSigningSecret),
+		WebhookMaxAttempts:   envInt("CALDIY_WEBHOOK_MAX_ATTEMPTS", defaultWebhookMaxAttempts),
 		RequestID:            env("CALDIY_REQUEST_ID", defaultRequestID),
 	}
 }
@@ -54,4 +60,16 @@ func env(name string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func envInt(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }

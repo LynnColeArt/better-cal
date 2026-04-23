@@ -18,6 +18,7 @@ services:
       CALDIY_WEBHOOK_SUBSCRIBER_URL: http://webhook-sink:8090/caldiy/webhook
       CALDIY_WEBHOOK_SIGNING_KEY_REF: fixture-booking-webhook
       CALDIY_WEBHOOK_SIGNING_SECRET: mock-webhook-signing-secret
+      CALDIY_WEBHOOK_MAX_ATTEMPTS: 3
       CALDIY_REQUEST_ID: mock-request-id
       CALDIY_DATABASE_URL: postgres://better_cal:better_cal_dev@postgres:5432/better_cal?sslmode=disable
     ports:
@@ -44,6 +45,7 @@ services:
       CALDIY_WEBHOOK_SUBSCRIBER_URL: http://webhook-sink:8090/caldiy/webhook
       CALDIY_WEBHOOK_SIGNING_KEY_REF: fixture-booking-webhook
       CALDIY_WEBHOOK_SIGNING_SECRET: mock-webhook-signing-secret
+      CALDIY_WEBHOOK_MAX_ATTEMPTS: 3
     depends_on:
       postgres:
         condition: service_healthy

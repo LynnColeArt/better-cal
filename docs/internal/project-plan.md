@@ -150,7 +150,7 @@ Deliverables:
 - conferencing creation and cleanup ports;
 - email enqueueing; cancel, reschedule, confirm, and decline now expose planned fixture email effects through the same port boundary;
 - webhook emission; cancel, reschedule, confirm, and decline now expose planned fixture webhook effects through the same port boundary, and the current Postgres canary persists typed webhook payload hints with the queued side effect so retries can rebuild contract-safe bodies without request-only inputs;
-- side-effect worker boundary; the current canary is packaged as an optional Compose worker, claims planned or retryable rows with row locks, writes a durable dispatch-log row through the dispatcher port, records typed booking webhook envelopes in `booking_webhook_deliveries`, selects active subscribers by trigger from `booking_webhook_subscriptions`, snapshots signed outbound attempts in `booking_webhook_delivery_attempts`, sends real HTTP webhook POSTs, retries only the pending subscriber rows, and stores only generic queue failure plus per-attempt response metadata while keeping webhook signing secrets outside the database behind key refs;
+- side-effect worker boundary; the current canary is packaged as an optional Compose worker, claims planned or retryable rows with row locks, writes a durable dispatch-log row through the dispatcher port, records typed booking webhook envelopes in `booking_webhook_deliveries`, selects active subscribers by trigger from `booking_webhook_subscriptions`, snapshots signed outbound attempts in `booking_webhook_delivery_attempts`, sends real HTTP webhook POSTs, retries only the pending subscriber rows, dead-letters exhausted attempts, disables failing subscriptions, and logs basic webhook delivery metrics while keeping webhook signing secrets outside the database behind key refs;
 - payment state integration;
 - idempotency and retry semantics; the current Postgres repository rejects conflicting idempotency writes without overwriting the original booking.
 
@@ -163,7 +163,7 @@ Exit criteria:
 
 - golden booking state tests pass;
 - provider calls are mocked and asserted;
-- duplicate booking and retry tests pass; the current Postgres canary includes idempotency conflict replay, rollback coverage for failed planned side-effect writes, queued webhook payload coverage, active-subscriber selection coverage, signed-attempt persistence coverage, HTTP webhook delivery coverage, and worker canary coverage for claiming, webhook-envelope recording, dispatch-log recording, delivering, retrying only pending subscriber attempts, and retry-marking planned side effects;
+- duplicate booking and retry tests pass; the current Postgres canary includes idempotency conflict replay, rollback coverage for failed planned side-effect writes, queued webhook payload coverage, active-subscriber selection coverage, signed-attempt persistence coverage, HTTP webhook delivery coverage, exhausted-attempt dead-letter coverage, subscriber disable coverage, and worker canary coverage for claiming, webhook-envelope recording, dispatch-log recording, delivering, retrying only pending subscriber attempts, and retry-marking planned side effects;
 - existing booking UI flows pass through the Next.js bridge.
 
 ## Phase 6: Integrations, Credentials, and App Store

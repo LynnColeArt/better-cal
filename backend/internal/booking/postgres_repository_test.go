@@ -675,11 +675,12 @@ func TestPostgresSideEffectDispatcherRetriesFailedWebhookAttempt(t *testing.T) {
 	var firstResponseStatus int
 	var firstLastError string
 	var firstDelivered bool
+	var firstDeadLettered bool
 	if err := pool.QueryRow(ctx, `
-		select min(attempt_count), min(coalesce(response_status, 0)), min(coalesce(last_error, '')), bool_and(delivered_at is not null)
+		select min(attempt_count), min(coalesce(response_status, 0)), min(coalesce(last_error, '')), bool_and(delivered_at is not null), bool_and(dead_lettered_at is not null)
 		from booking_webhook_delivery_attempts
 		where side_effect_id = $1
-	`, sideEffectID).Scan(&firstAttemptCount, &firstResponseStatus, &firstLastError, &firstDelivered); err != nil {
+	`, sideEffectID).Scan(&firstAttemptCount, &firstResponseStatus, &firstLastError, &firstDelivered, &firstDeadLettered); err != nil {
 		t.Fatal(err)
 	}
 	if firstAttemptCount != 1 {
@@ -694,6 +695,9 @@ func TestPostgresSideEffectDispatcherRetriesFailedWebhookAttempt(t *testing.T) {
 	if firstDelivered {
 		t.Fatal("unexpected delivered webhook attempt after failed transport")
 	}
+	if firstDeadLettered {
+		t.Fatal("unexpected dead-lettered webhook attempt after first failure")
+	}
 
 	responseStatus.Store(http.StatusAccepted)
 	if err := dispatcher.Dispatch(ctx, record); err != nil {
@@ -707,11 +711,12 @@ func TestPostgresSideEffectDispatcherRetriesFailedWebhookAttempt(t *testing.T) {
 	var finalResponseStatus int
 	var finalLastError string
 	var finalDelivered bool
+	var finalDeadLettered bool
 	if err := pool.QueryRow(ctx, `
-		select min(attempt_count), min(coalesce(response_status, 0)), min(coalesce(last_error, '')), bool_and(delivered_at is not null)
+		select min(attempt_count), min(coalesce(response_status, 0)), min(coalesce(last_error, '')), bool_and(delivered_at is not null), bool_and(dead_lettered_at is not null)
 		from booking_webhook_delivery_attempts
 		where side_effect_id = $1
-	`, sideEffectID).Scan(&finalAttemptCount, &finalResponseStatus, &finalLastError, &finalDelivered); err != nil {
+	`, sideEffectID).Scan(&finalAttemptCount, &finalResponseStatus, &finalLastError, &finalDelivered, &finalDeadLettered); err != nil {
 		t.Fatal(err)
 	}
 	if finalAttemptCount != 2 {
@@ -725,6 +730,157 @@ func TestPostgresSideEffectDispatcherRetriesFailedWebhookAttempt(t *testing.T) {
 	}
 	if !finalDelivered {
 		t.Fatal("expected delivered webhook attempt after retry")
+	}
+	if finalDeadLettered {
+		t.Fatal("unexpected dead-lettered webhook attempt after successful retry")
+	}
+}
+
+func TestPostgresSideEffectDispatcherDeadLettersAndDisablesSubscriber(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	subscriptionStore := NewPostgresWebhookSubscriptionStore(pool)
+	uid := fmt.Sprintf("repo-side-effect-deadletter-%d", time.Now().UnixNano())
+	signingKeyRef := "deadletter-key-ref"
+	signingSecret := "deadletter-signing-secret"
+	var requestCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	subscriberURL := server.URL + "/caldiy/webhook"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_delivery_attempts where subscriber_url = $1`, subscriberURL)
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled))
+	})
+	if _, err := pool.Exec(ctx, `delete from booking_webhook_subscriptions where trigger_event = $1`, string(WebhookTriggerBookingCancelled)); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedWebhookSubscriptions(ctx, subscriptionStore, FixtureWebhookSubscriptions(subscriberURL, signingKeyRef)); err != nil {
+		t.Fatal(err)
+	}
+
+	bookingValue := repositoryTestBooking(uid, "deadletter-request")
+	bookingValue.Status = "cancelled"
+	if err := repo.Save(ctx, []PlannedSideEffect{
+		{
+			Name:       SideEffectWebhookBookingCancelled,
+			BookingUID: uid,
+			RequestID:  "deadletter-request",
+			Payload: map[string]any{
+				"cancellationReason": "deadletter fixture cancellation",
+			},
+		},
+	}, bookingValue); err != nil {
+		t.Fatal(err)
+	}
+
+	var sideEffectID int64
+	if err := pool.QueryRow(ctx, `
+		select id
+		from booking_planned_side_effects
+		where booking_uid = $1
+	`, uid).Scan(&sideEffectID); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := NewPostgresSideEffectDispatcher(
+		pool,
+		repo,
+		subscriptionStore,
+		NewFixtureWebhookSigningSecretResolver(map[string]string{
+			signingKeyRef: signingSecret,
+		}),
+		NewHTTPWebhookTransport(server.Client()),
+		WithWebhookMaxAttempts(2),
+	)
+	record := PlannedSideEffectRecord{
+		ID:         sideEffectID,
+		Name:       SideEffectWebhookBookingCancelled,
+		BookingUID: uid,
+		RequestID:  "deadletter-request",
+		Payload: map[string]any{
+			"cancellationReason": "deadletter fixture cancellation",
+		},
+	}
+
+	if err := dispatcher.Dispatch(ctx, record); err == nil {
+		t.Fatal("expected first dispatch failure")
+	}
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if got := requestCount.Load(); got != 2 {
+		t.Fatalf("webhook requests = %d, want 2", got)
+	}
+
+	var attemptCount int
+	var responseStatus int
+	var delivered bool
+	var deadLettered bool
+	var lastError string
+	if err := pool.QueryRow(ctx, `
+		select min(attempt_count), min(coalesce(response_status, 0)), bool_and(delivered_at is not null), bool_and(dead_lettered_at is not null), min(coalesce(last_error, ''))
+		from booking_webhook_delivery_attempts
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&attemptCount, &responseStatus, &delivered, &deadLettered, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if attemptCount != 2 {
+		t.Fatalf("attempt count = %d, want 2", attemptCount)
+	}
+	if responseStatus != http.StatusServiceUnavailable {
+		t.Fatalf("response status = %d", responseStatus)
+	}
+	if delivered {
+		t.Fatal("unexpected delivered webhook attempt")
+	}
+	if !deadLettered {
+		t.Fatal("expected dead-lettered webhook attempt")
+	}
+	if lastError != "webhook delivery returned status 503" {
+		t.Fatalf("last_error = %q", lastError)
+	}
+
+	var active bool
+	var failureCount int
+	var disabledReason string
+	if err := pool.QueryRow(ctx, `
+		select active, failure_count, coalesce(disabled_reason, '')
+		from booking_webhook_subscriptions
+		where subscriber_url = $1
+			and trigger_event = $2
+	`, subscriberURL, string(WebhookTriggerBookingCancelled)).Scan(&active, &failureCount, &disabledReason); err != nil {
+		t.Fatal(err)
+	}
+	if active {
+		t.Fatal("dead-lettered subscriber remained active")
+	}
+	if failureCount != 2 {
+		t.Fatalf("failure count = %d, want 2", failureCount)
+	}
+	if disabledReason != "delivery attempts exhausted" {
+		t.Fatalf("disabled reason = %q", disabledReason)
+	}
+
+	metrics, err := ReadWebhookDeliveryMetrics(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metrics.DeadLetteredAttempts == 0 {
+		t.Fatal("metrics did not include dead-lettered attempt")
+	}
+	if metrics.DisabledSubscribers == 0 {
+		t.Fatal("metrics did not include disabled subscriber")
 	}
 }
 

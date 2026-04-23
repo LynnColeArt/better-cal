@@ -31,7 +31,10 @@ func (s *PostgresWebhookSubscriptionStore) SaveWebhookSubscription(ctx context.C
 		insert into booking_webhook_subscriptions (subscriber_url, trigger_event, signing_key_ref, active)
 		values ($1, $2, $3, $4)
 		on conflict (subscriber_url, trigger_event, signing_key_ref) do update set
-			active = excluded.active,
+			active = case
+				when booking_webhook_subscriptions.disabled_at is null then excluded.active
+				else booking_webhook_subscriptions.active
+			end,
 			updated_at = now()
 	`, subscription.SubscriberURL, string(subscription.TriggerEvent), subscription.SigningKeyRef, active); err != nil {
 		return fmt.Errorf("save webhook subscription: %w", err)

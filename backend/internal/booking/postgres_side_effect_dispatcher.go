@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const defaultWebhookMaxAttempts = 3
+
 type BookingReader interface {
 	ReadByUID(context.Context, string) (Booking, bool, error)
 }
@@ -21,16 +23,32 @@ type PostgresSideEffectDispatcher struct {
 	subscriptions  WebhookSubscriptionStore
 	secretResolver WebhookSigningSecretResolver
 	transport      WebhookAttemptTransport
+	maxAttempts    int
 }
 
-func NewPostgresSideEffectDispatcher(pool *pgxpool.Pool, bookings BookingReader, subscriptions WebhookSubscriptionStore, secretResolver WebhookSigningSecretResolver, transport WebhookAttemptTransport) PostgresSideEffectDispatcher {
-	return PostgresSideEffectDispatcher{
+type PostgresSideEffectDispatcherOption func(*PostgresSideEffectDispatcher)
+
+func WithWebhookMaxAttempts(maxAttempts int) PostgresSideEffectDispatcherOption {
+	return func(d *PostgresSideEffectDispatcher) {
+		if maxAttempts > 0 {
+			d.maxAttempts = maxAttempts
+		}
+	}
+}
+
+func NewPostgresSideEffectDispatcher(pool *pgxpool.Pool, bookings BookingReader, subscriptions WebhookSubscriptionStore, secretResolver WebhookSigningSecretResolver, transport WebhookAttemptTransport, opts ...PostgresSideEffectDispatcherOption) PostgresSideEffectDispatcher {
+	dispatcher := PostgresSideEffectDispatcher{
 		pool:           pool,
 		bookings:       bookings,
 		subscriptions:  subscriptions,
 		secretResolver: secretResolver,
 		transport:      transport,
+		maxAttempts:    defaultWebhookMaxAttempts,
 	}
+	for _, opt := range opts {
+		opt(&dispatcher)
+	}
+	return dispatcher
 }
 
 func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect PlannedSideEffectRecord) error {
@@ -70,10 +88,11 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 		receipt, err := d.transport.DeliverWebhookAttempt(ctx, attempt)
 		statusCode := webhookAttemptStatusCode(receipt, err)
 		if err != nil {
-			if markErr := markWebhookAttemptFailed(ctx, d.pool, attempt.ID, statusCode, err); markErr != nil {
+			result, markErr := markWebhookAttemptFailed(ctx, d.pool, attempt.ID, statusCode, err, d.maxAttempts)
+			if markErr != nil {
 				return fmt.Errorf("mark webhook attempt failed: %w", markErr)
 			}
-			if dispatchErr == nil {
+			if dispatchErr == nil && !result.DeadLettered {
 				dispatchErr = err
 			}
 			continue
@@ -221,6 +240,7 @@ func readPendingWebhookAttempts(ctx context.Context, tx db.Tx, sideEffectID int6
 		from booking_webhook_delivery_attempts
 		where side_effect_id = $1
 			and delivered_at is null
+			and dead_lettered_at is null
 		order by id
 	`, sideEffectID)
 	if err != nil {
@@ -257,45 +277,100 @@ func markWebhookAttemptDelivered(ctx context.Context, pool *pgxpool.Pool, attemp
 	if pool == nil {
 		return db.ErrNilPool
 	}
-	tag, err := pool.Exec(ctx, `
-		update booking_webhook_delivery_attempts
-		set delivered_at = now(),
-			response_status = $2,
-			last_error = null,
-			last_attempted_at = now(),
-			attempt_count = booking_webhook_delivery_attempts.attempt_count + 1
-		where id = $1
-			and delivered_at is null
-	`, attemptID, nullableStatusCode(statusCode))
-	if err != nil {
-		return fmt.Errorf("update delivered webhook attempt: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("webhook attempt %d was not pending", attemptID)
-	}
-	return nil
+	return db.WithTx(ctx, pool, func(tx db.Tx) error {
+		var subscriberID int64
+		err := tx.QueryRow(ctx, `
+			update booking_webhook_delivery_attempts
+			set delivered_at = now(),
+				response_status = $2,
+				last_error = null,
+				last_attempted_at = now(),
+				attempt_count = booking_webhook_delivery_attempts.attempt_count + 1
+			where id = $1
+				and delivered_at is null
+				and dead_lettered_at is null
+			returning subscriber_id
+		`, attemptID, nullableStatusCode(statusCode)).Scan(&subscriberID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("webhook attempt %d was not pending", attemptID)
+		}
+		if err != nil {
+			return fmt.Errorf("update delivered webhook attempt: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			update booking_webhook_subscriptions
+			set failure_count = 0,
+				updated_at = now()
+			where id = $1
+		`, subscriberID); err != nil {
+			return fmt.Errorf("reset webhook subscription failure count: %w", err)
+		}
+		return nil
+	})
 }
 
-func markWebhookAttemptFailed(ctx context.Context, pool *pgxpool.Pool, attemptID int64, statusCode int, dispatchErr error) error {
+type webhookAttemptFailureResult struct {
+	SubscriberID  int64
+	AttemptCount  int
+	DeadLettered  bool
+	DisabledSubID int64
+}
+
+func markWebhookAttemptFailed(ctx context.Context, pool *pgxpool.Pool, attemptID int64, statusCode int, dispatchErr error, maxAttempts int) (webhookAttemptFailureResult, error) {
 	if pool == nil {
-		return db.ErrNilPool
+		return webhookAttemptFailureResult{}, db.ErrNilPool
 	}
-	tag, err := pool.Exec(ctx, `
-		update booking_webhook_delivery_attempts
-		set response_status = $2,
-			last_error = $3,
-			last_attempted_at = now(),
-			attempt_count = booking_webhook_delivery_attempts.attempt_count + 1
-		where id = $1
-			and delivered_at is null
-	`, attemptID, nullableStatusCode(statusCode), safeWebhookAttemptError(dispatchErr))
-	if err != nil {
-		return fmt.Errorf("update failed webhook attempt: %w", err)
+	if maxAttempts <= 0 {
+		maxAttempts = defaultWebhookMaxAttempts
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("webhook attempt %d was not pending", attemptID)
-	}
-	return nil
+	result := webhookAttemptFailureResult{}
+	return result, db.WithTx(ctx, pool, func(tx db.Tx) error {
+		err := tx.QueryRow(ctx, `
+			update booking_webhook_delivery_attempts
+			set response_status = $2,
+				last_error = $3,
+				last_attempted_at = now(),
+				attempt_count = booking_webhook_delivery_attempts.attempt_count + 1,
+				dead_lettered_at = case
+					when booking_webhook_delivery_attempts.attempt_count + 1 >= $4 then coalesce(booking_webhook_delivery_attempts.dead_lettered_at, now())
+					else booking_webhook_delivery_attempts.dead_lettered_at
+				end
+			where id = $1
+				and delivered_at is null
+				and dead_lettered_at is null
+			returning subscriber_id, attempt_count, dead_lettered_at is not null
+		`, attemptID, nullableStatusCode(statusCode), safeWebhookAttemptError(dispatchErr), maxAttempts).Scan(&result.SubscriberID, &result.AttemptCount, &result.DeadLettered)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("webhook attempt %d was not pending", attemptID)
+		}
+		if err != nil {
+			return fmt.Errorf("update failed webhook attempt: %w", err)
+		}
+		if !result.DeadLettered {
+			if _, err := tx.Exec(ctx, `
+				update booking_webhook_subscriptions
+				set failure_count = failure_count + 1,
+					updated_at = now()
+				where id = $1
+			`, result.SubscriberID); err != nil {
+				return fmt.Errorf("record webhook subscription failure: %w", err)
+			}
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `
+			update booking_webhook_subscriptions
+			set active = false,
+				failure_count = failure_count + 1,
+				disabled_at = coalesce(disabled_at, now()),
+				disabled_reason = 'delivery attempts exhausted',
+				updated_at = now()
+			where id = $1
+		`, result.SubscriberID); err != nil {
+			return fmt.Errorf("disable webhook subscription: %w", err)
+		}
+		result.DisabledSubID = result.SubscriberID
+		return nil
+	})
 }
 
 func nullableStatusCode(statusCode int) any {

@@ -13,7 +13,7 @@ These controls exist to make sure the replacement does not repeat known unsafe p
 | SR-005 | OAuth codes and refresh tokens are replay-safe. | Concurrent exchange tests, replay fixtures, expiry fixtures, and revocation fixtures. |
 | SR-006 | Cron and job trigger credentials are not accepted in query strings. | Route tests for query credential rejection and signed-header success. |
 | SR-007 | Logs, traces, metrics, errors, and fixtures redact secret-bearing fields. | Redaction tests with realistic payloads and fixture secret scanner. |
-| SR-008 | Webhook verification and signing use the exact bytes and secrets intended by the public contract, with signing secrets resolved outside subscriber persistence and retry state scoped to pending attempts only. | Raw-body inbound tests, outbound signature fixtures, pending-attempt retry tests, and persistence checks for key-ref-only storage. |
+| SR-008 | Webhook verification and signing use the exact bytes and secrets intended by the public contract, with signing secrets resolved outside subscriber persistence, retry state scoped to pending attempts only, and exhausted attempts made visible without storing raw provider responses. | Raw-body inbound tests, outbound signature fixtures, pending-attempt retry tests, dead-letter tests, disabled-subscriber tests, and persistence checks for key-ref-only storage. |
 | SR-009 | Booking writes are transactional, idempotent, and authorization-checked before side effects. | State transition tests, retry tests, and provider mock assertions. |
 | SR-010 | API responses are allowlisted DTOs, not raw database or provider objects. | Response schema review and sensitive-field tests. |
 
@@ -115,6 +115,7 @@ Booking:
 - booking webhook subscriptions select only active subscribers for the matching trigger event;
 - booking webhook signing secrets never appear in subscription, delivery, or attempt tables and are resolved only through key refs at dispatch time;
 - booking webhook retry skips subscriber attempts already marked delivered and stores only response codes plus generic failure text;
+- booking webhook attempts are dead-lettered after the configured threshold and disabled subscriptions are not reactivated by fixture seeding;
 - booking cancel by unauthorized user;
 - booking reschedule by unauthorized user;
 - booking side-effect retry behavior is documented as at-least-once whenever network or persistence acknowledgements are ambiguous.

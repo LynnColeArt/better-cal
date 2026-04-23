@@ -51,6 +51,7 @@ func main() {
 			cfg.WebhookSigningKeyRef: cfg.WebhookSigningSecret,
 		}),
 		booking.NewHTTPWebhookTransport(nil),
+		booking.WithWebhookMaxAttempts(cfg.WebhookMaxAttempts),
 	)
 	worker := booking.NewSideEffectWorker(repository, dispatcher)
 	result, err := worker.RunOnce(ctx, 25)
@@ -62,5 +63,18 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	slog.Info("side-effect dispatch complete", "claimed", result.Claimed, "delivered", result.Delivered, "failed", result.Failed)
+	metrics, metricsErr := booking.ReadWebhookDeliveryMetrics(ctx, pool)
+	if metricsErr != nil {
+		slog.Warn("webhook delivery metrics unavailable", "error", metricsErr)
+	}
+	slog.Info(
+		"side-effect dispatch complete",
+		"claimed", result.Claimed,
+		"delivered", result.Delivered,
+		"failed", result.Failed,
+		"webhook_pending_attempts", metrics.PendingAttempts,
+		"webhook_failed_pending_attempts", metrics.FailedPendingAttempts,
+		"webhook_dead_lettered_attempts", metrics.DeadLetteredAttempts,
+		"webhook_disabled_subscribers", metrics.DisabledSubscribers,
+	)
 }
