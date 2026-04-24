@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
+	"github.com/LynnColeArt/better-cal/backend/internal/calendars"
 	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
 
@@ -41,6 +43,199 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			"email":     principal.Email,
 			"createdAt": principal.CreatedAt,
 			"updatedAt": principal.UpdatedAt,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
+func (s *Server) readSelectedCalendars(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicySelectedCalendarsRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	selectedCalendars, err := s.calendars().ReadSelectedCalendars(r.Context(), principal.ID)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"items":     selectedCalendars,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
+func (s *Server) saveSelectedCalendar(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicySelectedCalendarsWrite) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	var body calendars.SaveSelectedCalendarRequest
+	if !decodeJSON(r, &body) {
+		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
+		return
+	}
+
+	calendar, err := s.calendars().SaveSelectedCalendar(r.Context(), principal.ID, body)
+	if err != nil {
+		if errors.Is(err, calendars.ErrInvalidSelectedCalendar) {
+			s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid selected calendar", true)
+			return
+		}
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"calendar":  calendar,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
+func (s *Server) deleteSelectedCalendar(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicySelectedCalendarsWrite) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	calendarRef := r.PathValue("calendarRef")
+	result, err := s.calendars().DeleteSelectedCalendar(r.Context(), principal.ID, calendarRef)
+	if err != nil {
+		if errors.Is(err, calendars.ErrInvalidSelectedCalendarRef) {
+			s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid selected calendar", true)
+			return
+		}
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !result.Removed {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "Selected calendar not found", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"calendarRef":        calendarRef,
+			"removed":            true,
+			"destinationCleared": result.ClearedDestination,
+			"requestId":          s.requestID(r),
+		},
+	})
+}
+
+func (s *Server) readDestinationCalendar(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyDestinationCalendarsRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	calendar, found, err := s.calendars().ReadDestinationCalendar(r.Context(), principal.ID)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	var responseCalendar any
+	if found {
+		responseCalendar = calendar
+	}
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"calendar":  responseCalendar,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
+type saveDestinationCalendarRequest struct {
+	CalendarRef string `json:"calendarRef"`
+}
+
+func (s *Server) saveDestinationCalendar(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyDestinationCalendarsWrite) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	var body saveDestinationCalendarRequest
+	if !decodeJSON(r, &body) {
+		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
+		return
+	}
+
+	calendar, found, err := s.calendars().SetDestinationCalendar(r.Context(), principal.ID, body.CalendarRef)
+	if err != nil {
+		if errors.Is(err, calendars.ErrInvalidDestinationCalendarRef) {
+			s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid destination calendar", true)
+			return
+		}
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !found {
+		s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "Selected calendar not found", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"calendar":  calendar,
 			"requestId": s.requestID(r),
 		},
 	})

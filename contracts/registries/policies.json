@@ -6,8 +6,12 @@
     {
       "id": "policy.public.health",
       "status": "draft",
-      "authModes": ["none"],
-      "principalTypes": ["anonymous"],
+      "authModes": [
+        "none"
+      ],
+      "principalTypes": [
+        "anonymous"
+      ],
       "requiredPermissions": [],
       "resourceResolver": "none",
       "negativeFixtures": []
@@ -15,83 +19,274 @@
     {
       "id": "policy.me.read",
       "status": "draft",
-      "authModes": ["api-key", "platform-access-token", "session"],
-      "principalTypes": ["user", "managed-user"],
-      "requiredPermissions": ["me:read"],
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "me:read"
+      ],
       "resourceResolver": "current-principal",
-      "negativeFixtures": ["api-v2-auth.api-key.invalid", "api-v2-auth.session.identity-mutation-rejected"]
+      "negativeFixtures": [
+        "api-v2-auth.api-key.invalid",
+        "api-v2-auth.session.identity-mutation-rejected"
+      ]
     },
     {
       "id": "policy.oauth2.client.read",
       "status": "draft",
-      "authModes": ["api-key"],
-      "principalTypes": ["user", "organization-admin", "system-admin"],
-      "requiredPermissions": ["oauth-client:read"],
+      "authModes": [
+        "api-key"
+      ],
+      "principalTypes": [
+        "user",
+        "organization-admin",
+        "system-admin"
+      ],
+      "requiredPermissions": [
+        "oauth-client:read"
+      ],
       "resourceResolver": "oauth-client-by-client-id",
-      "negativeFixtures": ["missing-credential", "wrong-owner", "insufficient-permission"]
+      "negativeFixtures": [
+        "missing-credential",
+        "wrong-owner",
+        "insufficient-permission"
+      ]
     },
     {
       "id": "policy.oauth2.client.public-read",
       "status": "draft",
-      "authModes": ["none"],
-      "principalTypes": ["anonymous"],
+      "authModes": [
+        "none"
+      ],
+      "principalTypes": [
+        "anonymous"
+      ],
       "requiredPermissions": [],
       "resourceResolver": "oauth-client-public-metadata",
-      "negativeFixtures": ["unknown-client-id"]
+      "negativeFixtures": [
+        "unknown-client-id"
+      ]
     },
     {
       "id": "policy.platform-client.read",
       "status": "draft",
-      "authModes": ["platform-client-secret"],
-      "principalTypes": ["platform-client"],
-      "requiredPermissions": ["platform-client:read"],
+      "authModes": [
+        "platform-client-secret"
+      ],
+      "principalTypes": [
+        "platform-client"
+      ],
+      "requiredPermissions": [
+        "platform-client:read"
+      ],
       "resourceResolver": "platform-client-by-client-id",
-      "negativeFixtures": ["api-v2-auth.platform-client.invalid-secret"]
+      "negativeFixtures": [
+        "api-v2-auth.platform-client.invalid-secret"
+      ]
     },
     {
       "id": "policy.oauth2.token.exchange",
       "status": "draft",
-      "authModes": ["oauth-client", "public-pkce-client"],
-      "principalTypes": ["oauth-client"],
-      "requiredPermissions": ["oauth-token:exchange"],
+      "authModes": [
+        "oauth-client",
+        "public-pkce-client"
+      ],
+      "principalTypes": [
+        "oauth-client"
+      ],
+      "requiredPermissions": [
+        "oauth-token:exchange"
+      ],
       "resourceResolver": "oauth-client-and-authorization-code",
-      "negativeFixtures": ["api-v2-auth.oauth-code.replay-denied", "wrong-client", "wrong-redirect-uri", "expired-code"]
+      "negativeFixtures": [
+        "api-v2-auth.oauth-code.replay-denied",
+        "wrong-client",
+        "wrong-redirect-uri",
+        "expired-code"
+      ]
     },
     {
       "id": "policy.booking.read",
       "status": "draft",
-      "authModes": ["api-key", "platform-access-token", "session", "public-booking-token"],
-      "principalTypes": ["user", "platform-client", "managed-user", "anonymous-token-holder"],
-      "requiredPermissions": ["booking:read"],
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session",
+        "public-booking-token"
+      ],
+      "principalTypes": [
+        "user",
+        "platform-client",
+        "managed-user",
+        "anonymous-token-holder"
+      ],
+      "requiredPermissions": [
+        "booking:read"
+      ],
       "resourceResolver": "booking-by-public-uid",
-      "negativeFixtures": ["booking.read.wrong-owner-denied", "wrong-organization", "invalid-public-token"]
+      "negativeFixtures": [
+        "booking.read.wrong-owner-denied",
+        "wrong-organization",
+        "invalid-public-token"
+      ]
     },
     {
       "id": "policy.booking.write",
       "status": "draft",
-      "authModes": ["api-key", "platform-access-token", "session", "public-booking-token"],
-      "principalTypes": ["user", "platform-client", "managed-user", "anonymous-token-holder"],
-      "requiredPermissions": ["booking:write"],
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session",
+        "public-booking-token"
+      ],
+      "principalTypes": [
+        "user",
+        "platform-client",
+        "managed-user",
+        "anonymous-token-holder"
+      ],
+      "requiredPermissions": [
+        "booking:write"
+      ],
       "resourceResolver": "booking-target-event-type",
-      "negativeFixtures": ["booking.create.unauthorized-user-denied", "booking.create.wrong-owner-denied", "booking.cancel.wrong-owner-denied", "booking.reschedule.wrong-owner-denied", "booking.create.unavailable-slot-denied", "wrong-organization"]
+      "negativeFixtures": [
+        "booking.create.unauthorized-user-denied",
+        "booking.create.wrong-owner-denied",
+        "booking.cancel.wrong-owner-denied",
+        "booking.reschedule.wrong-owner-denied",
+        "booking.create.unavailable-slot-denied",
+        "wrong-organization"
+      ]
     },
     {
       "id": "policy.booking.host-action",
       "status": "draft",
-      "authModes": ["api-key", "platform-access-token", "session"],
-      "principalTypes": ["user", "platform-client", "managed-user"],
-      "requiredPermissions": ["booking:host-action"],
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "platform-client",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "booking:host-action"
+      ],
       "resourceResolver": "booking-host-or-platform-permission",
-      "negativeFixtures": ["booking.confirm.wrong-host-denied", "booking.decline.wrong-host-denied", "wrong-team", "insufficient-permission"]
+      "negativeFixtures": [
+        "booking.confirm.wrong-host-denied",
+        "booking.decline.wrong-host-denied",
+        "wrong-team",
+        "insufficient-permission"
+      ]
+    },
+    {
+      "id": "policy.selected-calendars.read",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "selected-calendars:read"
+      ],
+      "resourceResolver": "current-principal-selected-calendars",
+      "negativeFixtures": [
+        "missing-credential",
+        "insufficient-permission"
+      ]
+    },
+    {
+      "id": "policy.selected-calendars.write",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "selected-calendars:write"
+      ],
+      "resourceResolver": "current-principal-selected-calendars",
+      "negativeFixtures": [
+        "missing-credential",
+        "insufficient-permission"
+      ]
+    },
+    {
+      "id": "policy.destination-calendars.read",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "destination-calendars:read"
+      ],
+      "resourceResolver": "current-principal-destination-calendar",
+      "negativeFixtures": [
+        "missing-credential",
+        "insufficient-permission"
+      ]
+    },
+    {
+      "id": "policy.destination-calendars.write",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "destination-calendars:write"
+      ],
+      "resourceResolver": "current-principal-destination-calendar",
+      "negativeFixtures": [
+        "missing-credential",
+        "insufficient-permission"
+      ]
     },
     {
       "id": "policy.slots.read",
       "status": "draft",
-      "authModes": ["none"],
-      "principalTypes": ["anonymous"],
+      "authModes": [
+        "none"
+      ],
+      "principalTypes": [
+        "anonymous"
+      ],
       "requiredPermissions": [],
       "resourceResolver": "public-event-type-slots",
-      "negativeFixtures": ["unknown-event-type", "private-event-type"]
+      "negativeFixtures": [
+        "unknown-event-type",
+        "private-event-type"
+      ]
     }
   ]
 }

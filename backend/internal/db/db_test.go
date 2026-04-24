@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,13 +60,37 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, tableName := range []string{"booking_fixtures", "bookings", "booking_attendees", "booking_planned_side_effects", "booking_side_effect_dispatch_log", "booking_webhook_deliveries", "booking_webhook_subscriptions", "booking_webhook_delivery_attempts", "booking_email_deliveries", "booking_email_delivery_attempts", "booking_calendar_dispatches", "booking_calendar_dispatch_attempts", "api_key_principals", "oauth_clients", "platform_clients"} {
+	for _, tableName := range []string{"booking_fixtures", "bookings", "booking_attendees", "booking_planned_side_effects", "booking_side_effect_dispatch_log", "booking_webhook_deliveries", "booking_webhook_subscriptions", "booking_webhook_delivery_attempts", "booking_email_deliveries", "booking_email_delivery_attempts", "booking_calendar_dispatches", "booking_calendar_dispatch_attempts", "selected_calendars", "destination_calendars", "api_key_principals", "oauth_clients", "platform_clients"} {
 		var exists bool
 		if err := pool.QueryRow(ctx, `select exists(select 1 from information_schema.tables where table_name = $1)`, tableName).Scan(&exists); err != nil {
 			t.Fatal(err)
 		}
 		if !exists {
 			t.Fatalf("%s table was not created", tableName)
+		}
+	}
+}
+
+func TestMigrateAllowsConcurrentCallers(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	errs := make(chan error, 4)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- Migrate(ctx, pool)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

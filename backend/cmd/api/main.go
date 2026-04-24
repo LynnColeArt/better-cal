@@ -10,6 +10,7 @@ import (
 
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
+	"github.com/LynnColeArt/better-cal/backend/internal/calendars"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/LynnColeArt/better-cal/backend/internal/httpapi"
@@ -89,6 +90,9 @@ func main() {
 				booking.NewPostgresRepository(pool),
 				booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(slotService)),
 			),
+		))
+		serverOptions = append(serverOptions, httpapi.WithCalendarStore(
+			calendars.NewStoreWithRepository(calendars.NewPostgresRepository(pool)),
 		))
 		cancel()
 		slog.Info("database connection ready")

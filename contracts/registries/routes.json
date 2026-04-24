@@ -8,7 +8,9 @@
       "surface": "api-v2",
       "method": "GET",
       "path": "/health",
-      "versions": ["neutral"],
+      "versions": [
+        "neutral"
+      ],
       "status": "draft",
       "priority": "low",
       "spec": "docs/spec/compatibility-matrix.md",
@@ -21,38 +23,56 @@
       "surface": "api-v2",
       "method": "GET",
       "path": "/v2/auth/oauth2/clients/{clientId}",
-      "versions": ["all-api-v2"],
+      "versions": [
+        "all-api-v2"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/api-v2-auth-spec.md",
       "policy": "policy.oauth2.client.read",
-      "schemaRefs": ["schema.api-v2.oauth2-client.response"],
-      "fixtureRefs": ["api-v2-auth.oauth2-client-metadata.success", "api-v2-auth.oauth2-client-metadata.not-found"]
+      "schemaRefs": [
+        "schema.api-v2.oauth2-client.response"
+      ],
+      "fixtureRefs": [
+        "api-v2-auth.oauth2-client-metadata.success",
+        "api-v2-auth.oauth2-client-metadata.not-found"
+      ]
     },
     {
       "id": "api-v2.oauth2.token",
       "surface": "api-v2",
       "method": "POST",
       "path": "/v2/auth/oauth2/token",
-      "versions": ["all-api-v2"],
+      "versions": [
+        "all-api-v2"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/api-v2-auth-spec.md",
       "policy": "policy.oauth2.token.exchange",
-      "schemaRefs": ["schema.api-v2.oauth2-token.request", "schema.api-v2.oauth2-token.response"],
-      "fixtureRefs": ["api-v2-auth.oauth-code.replay-denied"]
+      "schemaRefs": [
+        "schema.api-v2.oauth2-token.request",
+        "schema.api-v2.oauth2-token.response"
+      ],
+      "fixtureRefs": [
+        "api-v2-auth.oauth-code.replay-denied"
+      ]
     },
     {
       "id": "api-v2.atoms.oauth2.client.get",
       "surface": "api-v2",
       "method": "GET",
       "path": "/v2/atoms/auth/oauth2/clients/{clientId}",
-      "versions": ["all-api-v2"],
+      "versions": [
+        "all-api-v2"
+      ],
       "status": "draft",
       "priority": "medium",
       "spec": "docs/spec/api-v2-auth-spec.md",
       "policy": "policy.oauth2.client.public-read",
-      "schemaRefs": ["schema.api-v2.atoms-oauth2-client.response"],
+      "schemaRefs": [
+        "schema.api-v2.atoms-oauth2-client.response"
+      ],
       "fixtureRefs": []
     },
     {
@@ -60,117 +80,274 @@
       "surface": "api-v2",
       "method": "GET",
       "path": "/v2/me",
-      "versions": ["all-api-v2"],
+      "versions": [
+        "all-api-v2"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/api-v2-auth-spec.md",
       "policy": "policy.me.read",
-      "schemaRefs": ["schema.api-v2.me.response"],
-      "fixtureRefs": ["api-v2-auth.api-key.success", "api-v2-auth.api-key.invalid", "api-v2-auth.session.identity-mutation-rejected"]
+      "schemaRefs": [
+        "schema.api-v2.me.response"
+      ],
+      "fixtureRefs": [
+        "api-v2-auth.api-key.success",
+        "api-v2-auth.api-key.invalid",
+        "api-v2-auth.session.identity-mutation-rejected"
+      ]
     },
     {
       "id": "api-v2.platform-client.get",
       "surface": "api-v2",
       "method": "GET",
       "path": "/v2/oauth-clients/{clientId}",
-      "versions": ["2024-08-13"],
+      "versions": [
+        "2024-08-13"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/api-v2-auth-spec.md",
       "policy": "policy.platform-client.read",
       "schemaRefs": [],
-      "fixtureRefs": ["api-v2-auth.platform-client.success", "api-v2-auth.platform-client.invalid-secret"]
+      "fixtureRefs": [
+        "api-v2-auth.platform-client.success",
+        "api-v2-auth.platform-client.invalid-secret"
+      ]
+    },
+    {
+      "id": "api-v2.selected-calendars.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/selected-calendars",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.selected-calendars.read",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
+      "id": "api-v2.selected-calendars.save",
+      "surface": "api-v2",
+      "method": "POST",
+      "path": "/v2/selected-calendars",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.selected-calendars.write",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
+      "id": "api-v2.selected-calendars.delete",
+      "surface": "api-v2",
+      "method": "DELETE",
+      "path": "/v2/selected-calendars/{calendarRef}",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.selected-calendars.write",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
+      "id": "api-v2.destination-calendars.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/destination-calendars",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.destination-calendars.read",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
+      "id": "api-v2.destination-calendars.save",
+      "surface": "api-v2",
+      "method": "POST",
+      "path": "/v2/destination-calendars",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.destination-calendars.write",
+      "schemaRefs": [],
+      "fixtureRefs": []
     },
     {
       "id": "api-v2.slots.get",
       "surface": "api-v2",
       "method": "GET",
       "path": "/v2/slots",
-      "versions": ["2024-04-15", "2024-09-04"],
+      "versions": [
+        "2024-04-15",
+        "2024-09-04"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/compatibility-matrix.md",
       "policy": "policy.slots.read",
-      "schemaRefs": ["schema.api-v2.slots.response"],
-      "fixtureRefs": ["slots.read.personal-basic"]
+      "schemaRefs": [
+        "schema.api-v2.slots.response"
+      ],
+      "fixtureRefs": [
+        "slots.read.personal-basic"
+      ]
     },
     {
       "id": "api-v2.bookings.create",
       "surface": "api-v2",
       "method": "POST",
       "path": "/v2/bookings",
-      "versions": ["2024-04-15", "2024-06-11", "2024-06-14", "2024-08-13"],
+      "versions": [
+        "2024-04-15",
+        "2024-06-11",
+        "2024-06-14",
+        "2024-08-13"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.write",
-      "schemaRefs": ["schema.api-v2.booking.create.request", "schema.api-v2.booking.create.response"],
-      "fixtureRefs": ["booking.create.personal-basic", "booking.create.duplicate-idempotency-key", "booking.create.unauthorized-user-denied", "booking.create.wrong-owner-denied", "booking.create.secret-field-denied", "booking.create.unavailable-slot-denied"]
+      "schemaRefs": [
+        "schema.api-v2.booking.create.request",
+        "schema.api-v2.booking.create.response"
+      ],
+      "fixtureRefs": [
+        "booking.create.personal-basic",
+        "booking.create.duplicate-idempotency-key",
+        "booking.create.unauthorized-user-denied",
+        "booking.create.wrong-owner-denied",
+        "booking.create.secret-field-denied",
+        "booking.create.unavailable-slot-denied"
+      ]
     },
     {
       "id": "api-v2.bookings.get",
       "surface": "api-v2",
       "method": "GET",
       "path": "/v2/bookings/{bookingUid}",
-      "versions": ["2024-04-15", "2024-06-11", "2024-06-14", "2024-08-13"],
+      "versions": [
+        "2024-04-15",
+        "2024-06-11",
+        "2024-06-14",
+        "2024-08-13"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.read",
-      "schemaRefs": ["schema.api-v2.booking.response"],
-      "fixtureRefs": ["booking.read.by-uid", "booking.read.wrong-owner-denied"]
+      "schemaRefs": [
+        "schema.api-v2.booking.response"
+      ],
+      "fixtureRefs": [
+        "booking.read.by-uid",
+        "booking.read.wrong-owner-denied"
+      ]
     },
     {
       "id": "api-v2.bookings.cancel",
       "surface": "api-v2",
       "method": "POST",
       "path": "/v2/bookings/{bookingUid}/cancel",
-      "versions": ["2024-04-15", "2024-06-11", "2024-06-14", "2024-08-13"],
+      "versions": [
+        "2024-04-15",
+        "2024-06-11",
+        "2024-06-14",
+        "2024-08-13"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.write",
-      "schemaRefs": ["schema.api-v2.booking.cancel.request", "schema.api-v2.booking.cancel.response"],
-      "fixtureRefs": ["booking.cancel.owner", "booking.cancel.wrong-owner-denied"]
+      "schemaRefs": [
+        "schema.api-v2.booking.cancel.request",
+        "schema.api-v2.booking.cancel.response"
+      ],
+      "fixtureRefs": [
+        "booking.cancel.owner",
+        "booking.cancel.wrong-owner-denied"
+      ]
     },
     {
       "id": "api-v2.bookings.reschedule",
       "surface": "api-v2",
       "method": "POST",
       "path": "/v2/bookings/{bookingUid}/reschedule",
-      "versions": ["2024-04-15", "2024-06-11", "2024-06-14", "2024-08-13"],
+      "versions": [
+        "2024-04-15",
+        "2024-06-11",
+        "2024-06-14",
+        "2024-08-13"
+      ],
       "status": "draft",
       "priority": "critical",
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.write",
-      "schemaRefs": ["schema.api-v2.booking.reschedule.request", "schema.api-v2.booking.reschedule.response"],
-      "fixtureRefs": ["booking.reschedule.owner", "booking.reschedule.wrong-owner-denied"]
+      "schemaRefs": [
+        "schema.api-v2.booking.reschedule.request",
+        "schema.api-v2.booking.reschedule.response"
+      ],
+      "fixtureRefs": [
+        "booking.reschedule.owner",
+        "booking.reschedule.wrong-owner-denied"
+      ]
     },
     {
       "id": "api-v2.bookings.confirm",
       "surface": "api-v2",
       "method": "POST",
       "path": "/v2/bookings/{bookingUid}/confirm",
-      "versions": ["2024-08-13"],
+      "versions": [
+        "2024-08-13"
+      ],
       "status": "draft",
       "priority": "high",
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.host-action",
-      "schemaRefs": ["schema.api-v2.booking.confirm.response"],
-      "fixtureRefs": ["booking.confirm.host", "booking.confirm.wrong-host-denied"]
+      "schemaRefs": [
+        "schema.api-v2.booking.confirm.response"
+      ],
+      "fixtureRefs": [
+        "booking.confirm.host",
+        "booking.confirm.wrong-host-denied"
+      ]
     },
     {
       "id": "api-v2.bookings.decline",
       "surface": "api-v2",
       "method": "POST",
       "path": "/v2/bookings/{bookingUid}/decline",
-      "versions": ["2024-08-13"],
+      "versions": [
+        "2024-08-13"
+      ],
       "status": "draft",
       "priority": "high",
       "spec": "docs/spec/booking-lifecycle-spec.md",
       "policy": "policy.booking.host-action",
-      "schemaRefs": ["schema.api-v2.booking.decline.request", "schema.api-v2.booking.decline.response"],
-      "fixtureRefs": ["booking.decline.host", "booking.decline.wrong-host-denied"]
+      "schemaRefs": [
+        "schema.api-v2.booking.decline.request",
+        "schema.api-v2.booking.decline.response"
+      ],
+      "fixtureRefs": [
+        "booking.decline.host",
+        "booking.decline.wrong-host-denied"
+      ]
     }
   ]
 }

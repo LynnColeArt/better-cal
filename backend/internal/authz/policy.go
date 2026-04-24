@@ -5,13 +5,17 @@ import "github.com/LynnColeArt/better-cal/backend/internal/auth"
 type Policy string
 
 const (
-	PolicyMeRead             Policy = "policy.me.read"
-	PolicyOAuth2Read         Policy = "policy.oauth2.client.read"
-	PolicyPlatformClientRead Policy = "policy.platform-client.read"
-	PolicyBookingRead        Policy = "policy.booking.read"
-	PolicyBookingWrite       Policy = "policy.booking.write"
-	PolicyBookingHostAction  Policy = "policy.booking.host-action"
-	PolicySlotsRead          Policy = "policy.slots.read"
+	PolicyMeRead                    Policy = "policy.me.read"
+	PolicyOAuth2Read                Policy = "policy.oauth2.client.read"
+	PolicyPlatformClientRead        Policy = "policy.platform-client.read"
+	PolicyBookingRead               Policy = "policy.booking.read"
+	PolicyBookingWrite              Policy = "policy.booking.write"
+	PolicyBookingHostAction         Policy = "policy.booking.host-action"
+	PolicySlotsRead                 Policy = "policy.slots.read"
+	PolicySelectedCalendarsRead     Policy = "policy.selected-calendars.read"
+	PolicySelectedCalendarsWrite    Policy = "policy.selected-calendars.write"
+	PolicyDestinationCalendarsRead  Policy = "policy.destination-calendars.read"
+	PolicyDestinationCalendarsWrite Policy = "policy.destination-calendars.write"
 )
 
 type Decision struct {
@@ -31,13 +35,17 @@ type Authorizer struct {
 func NewAuthorizer() *Authorizer {
 	return &Authorizer{
 		requiredPermissions: map[Policy][]string{
-			PolicyMeRead:             {"me:read"},
-			PolicyOAuth2Read:         {"oauth-client:read"},
-			PolicyPlatformClientRead: {"platform-client:read"},
-			PolicyBookingRead:        {"booking:read"},
-			PolicyBookingWrite:       {"booking:write"},
-			PolicyBookingHostAction:  {"booking:host-action"},
-			PolicySlotsRead:          {},
+			PolicyMeRead:                    {"me:read"},
+			PolicyOAuth2Read:                {"oauth-client:read"},
+			PolicyPlatformClientRead:        {"platform-client:read"},
+			PolicyBookingRead:               {"booking:read"},
+			PolicyBookingWrite:              {"booking:write"},
+			PolicyBookingHostAction:         {"booking:host-action"},
+			PolicySlotsRead:                 {},
+			PolicySelectedCalendarsRead:     {"selected-calendars:read"},
+			PolicySelectedCalendarsWrite:    {"selected-calendars:write"},
+			PolicyDestinationCalendarsRead:  {"destination-calendars:read"},
+			PolicyDestinationCalendarsWrite: {"destination-calendars:write"},
 		},
 	}
 }

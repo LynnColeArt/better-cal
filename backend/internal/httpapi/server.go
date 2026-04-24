@@ -10,6 +10,7 @@ import (
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
+	"github.com/LynnColeArt/better-cal/backend/internal/calendars"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/logging"
 	"github.com/LynnColeArt/better-cal/backend/internal/slots"
@@ -20,13 +21,14 @@ type contextKey string
 const requestIDKey contextKey = "request-id"
 
 type Server struct {
-	cfg          config.Config
-	authService  *auth.Service
-	authorizer   *authz.Authorizer
-	bookingStore *booking.Store
-	slotService  *slots.Service
-	logger       *slog.Logger
-	mux          *http.ServeMux
+	cfg           config.Config
+	authService   *auth.Service
+	authorizer    *authz.Authorizer
+	bookingStore  *booking.Store
+	calendarStore *calendars.Store
+	slotService   *slots.Service
+	logger        *slog.Logger
+	mux           *http.ServeMux
 }
 
 type Option func(*Server)
@@ -35,6 +37,14 @@ func WithBookingStore(store *booking.Store) Option {
 	return func(s *Server) {
 		if store != nil {
 			s.bookingStore = store
+		}
+	}
+}
+
+func WithCalendarStore(store *calendars.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.calendarStore = store
 		}
 	}
 }
@@ -77,6 +87,9 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger, opts ...Option)
 	}
 	if server.slotService == nil {
 		server.slotService = slots.NewService()
+	}
+	if server.calendarStore == nil {
+		server.calendarStore = calendars.NewStore()
 	}
 	if server.bookingStore == nil {
 		server.bookingStore = booking.NewStore(
@@ -127,6 +140,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.health)
 	s.mux.HandleFunc("GET /v2/me", s.me)
+	s.mux.HandleFunc("GET /v2/selected-calendars", s.readSelectedCalendars)
+	s.mux.HandleFunc("POST /v2/selected-calendars", s.saveSelectedCalendar)
+	s.mux.HandleFunc("DELETE /v2/selected-calendars/{calendarRef}", s.deleteSelectedCalendar)
+	s.mux.HandleFunc("GET /v2/destination-calendars", s.readDestinationCalendar)
+	s.mux.HandleFunc("POST /v2/destination-calendars", s.saveDestinationCalendar)
 	s.mux.HandleFunc("GET /v2/slots", s.readSlots)
 	s.mux.HandleFunc("POST /v2/bookings", s.createBooking)
 	s.mux.HandleFunc("GET /v2/bookings/{bookingUid}", s.readBooking)
@@ -192,6 +210,14 @@ func (s *Server) bookings() *booking.Store {
 		booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(s.slots())),
 	)
 	return s.bookingStore
+}
+
+func (s *Server) calendars() *calendars.Store {
+	if s.calendarStore != nil {
+		return s.calendarStore
+	}
+	s.calendarStore = calendars.NewStore()
+	return s.calendarStore
 }
 
 func (s *Server) slots() *slots.Service {

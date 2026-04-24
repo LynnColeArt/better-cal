@@ -20,6 +20,18 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer invalid", nil, http.StatusUnauthorized)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "cal_test_valid_mock", nil, http.StatusUnauthorized)
+	assertStatus(t, server.URL, http.MethodGet, "/v2/selected-calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodGet, "/v2/destination-calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodPost, "/v2/selected-calendars", "Bearer cal_test_valid_mock", map[string]any{
+		"calendarRef": "starter-calendar",
+		"provider":    "google-calendar-fixture",
+		"externalId":  "google-starter-calendar",
+		"name":        "Starter Calendar",
+	}, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodPost, "/v2/destination-calendars", "Bearer cal_test_valid_mock", map[string]any{
+		"calendarRef": "starter-calendar",
+	}, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodDelete, "/v2/selected-calendars/starter-calendar", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/slots?eventTypeId=1001&start=2026-05-01T00:00:00.000Z&end=2026-05-02T00:00:00.000Z&timeZone=America%2FChicago", "", nil, http.StatusOK)
 
 	platformReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/oauth-clients/mock-platform-client", nil)
@@ -147,6 +159,108 @@ func TestBookingResourceAuthorizationDeniesWrongOwner(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/reschedule", "Bearer "+auth.FixtureWrongOwnerAPIKey, map[string]any{"start": "2026-05-02T15:00:00.000Z"}, http.StatusForbidden)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-pending-confirm/confirm", "Bearer "+auth.FixtureWrongOwnerAPIKey, map[string]any{}, http.StatusForbidden)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-pending-decline/decline", "Bearer "+auth.FixtureWrongOwnerAPIKey, map[string]any{"reason": "Fixture decline"}, http.StatusForbidden)
+}
+
+func TestCalendarManagementRoundTrip(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/v2/selected-calendars", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("authorization", "Bearer cal_test_valid_mock")
+
+	resp, body := do(t, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"calendarRef":"selected-calendar-fixture"`)) {
+		t.Fatalf("body did not contain fixture selected calendar: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"calendarRef":"destination-calendar-fixture"`)) {
+		t.Fatalf("body did not contain fixture destination calendar: %s", body)
+	}
+
+	saveReq, err := http.NewRequest(http.MethodPost, server.URL+"/v2/selected-calendars", bytes.NewReader([]byte(`{
+		"calendarRef": "team-calendar",
+		"provider": "google-calendar-fixture",
+		"externalId": "google-team-calendar",
+		"name": "Team Calendar"
+	}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveReq.Header.Set("authorization", "Bearer cal_test_valid_mock")
+	saveReq.Header.Set("content-type", "application/json")
+
+	resp, body = do(t, saveReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar"`)) {
+		t.Fatalf("save body did not contain team calendar: %s", body)
+	}
+
+	destinationReq, err := http.NewRequest(http.MethodPost, server.URL+"/v2/destination-calendars", bytes.NewReader([]byte(`{
+		"calendarRef": "team-calendar"
+	}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	destinationReq.Header.Set("authorization", "Bearer cal_test_valid_mock")
+	destinationReq.Header.Set("content-type", "application/json")
+
+	resp, body = do(t, destinationReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("destination status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar"`)) {
+		t.Fatalf("destination body did not contain team calendar: %s", body)
+	}
+
+	readDestinationReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/destination-calendars", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readDestinationReq.Header.Set("authorization", "Bearer cal_test_valid_mock")
+
+	resp, body = do(t, readDestinationReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read destination status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar"`)) {
+		t.Fatalf("read destination body did not contain team calendar: %s", body)
+	}
+
+	deleteReq, err := http.NewRequest(http.MethodDelete, server.URL+"/v2/selected-calendars/team-calendar", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteReq.Header.Set("authorization", "Bearer cal_test_valid_mock")
+
+	resp, body = do(t, deleteReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"destinationCleared":true`)) {
+		t.Fatalf("delete body did not clear destination: %s", body)
+	}
+
+	readDestinationReq, err = http.NewRequest(http.MethodGet, server.URL+"/v2/destination-calendars", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readDestinationReq.Header.Set("authorization", "Bearer cal_test_valid_mock")
+
+	resp, body = do(t, readDestinationReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("read destination status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"calendar":null`)) {
+		t.Fatalf("read destination body did not clear calendar: %s", body)
+	}
 }
 
 func TestRequestIDPropagatesToResponse(t *testing.T) {
