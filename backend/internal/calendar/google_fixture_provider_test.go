@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/integrations"
 )
 
 func TestGoogleFixtureProviderPreparesCancelDispatch(t *testing.T) {
@@ -73,6 +75,33 @@ func TestGoogleFixtureProviderReadsCatalog(t *testing.T) {
 	}
 	if snapshot.Calendars[2].CalendarRef != "team-calendar-fixture" {
 		t.Fatalf("team calendar ref = %q", snapshot.Calendars[2].CalendarRef)
+	}
+}
+
+func TestGoogleFixtureProviderReadsIntegrationStatus(t *testing.T) {
+	provider := NewGoogleFixtureProvider()
+
+	snapshot, err := provider.ReadStatus(context.Background(), integrations.StatusInput{UserID: 123})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Credentials) != 1 {
+		t.Fatalf("credential status count = %d", len(snapshot.Credentials))
+	}
+	if snapshot.Credentials[0].CredentialRef != "google-calendar-credential-fixture" {
+		t.Fatalf("credential ref = %q", snapshot.Credentials[0].CredentialRef)
+	}
+	if snapshot.Credentials[0].StatusCode != "ok" {
+		t.Fatalf("credential status code = %q", snapshot.Credentials[0].StatusCode)
+	}
+	if len(snapshot.CalendarConnections) != 1 {
+		t.Fatalf("calendar connection status count = %d", len(snapshot.CalendarConnections))
+	}
+	if snapshot.CalendarConnections[0].ConnectionRef != googleFixtureConnectionRef {
+		t.Fatalf("connection ref = %q", snapshot.CalendarConnections[0].ConnectionRef)
+	}
+	if snapshot.CalendarConnections[0].StatusCode != "ok" {
+		t.Fatalf("connection status code = %q", snapshot.CalendarConnections[0].StatusCode)
 	}
 }
 

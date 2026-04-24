@@ -2,8 +2,10 @@ package calendars
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/jackc/pgx/v5"
@@ -20,7 +22,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) ReadCalendarConnections(ctx context.Context, userID int) ([]CalendarConnection, error) {
 	rows, err := r.pool.Query(ctx, `
-		select connection_ref, provider, account_ref, account_email, status
+		select connection_ref, provider, account_ref, account_email, status, status_code, status_checked_at
 		from calendar_connections
 		where user_id = $1
 		order by connection_ref
@@ -33,8 +35,16 @@ func (r *PostgresRepository) ReadCalendarConnections(ctx context.Context, userID
 	connections := []CalendarConnection{}
 	for rows.Next() {
 		var connection CalendarConnection
-		if err := rows.Scan(&connection.ConnectionRef, &connection.Provider, &connection.AccountRef, &connection.AccountEmail, &connection.Status); err != nil {
+		var statusCode sql.NullString
+		var statusCheckedAt sql.NullTime
+		if err := rows.Scan(&connection.ConnectionRef, &connection.Provider, &connection.AccountRef, &connection.AccountEmail, &connection.Status, &statusCode, &statusCheckedAt); err != nil {
 			return nil, fmt.Errorf("scan calendar connection: %w", err)
+		}
+		if statusCode.Valid {
+			connection.StatusCode = statusCode.String
+		}
+		if statusCheckedAt.Valid {
+			connection.StatusCheckedAt = formatCalendarWireTime(statusCheckedAt.Time)
 		}
 		connections = append(connections, connection)
 	}
@@ -201,6 +211,66 @@ func (r *PostgresRepository) SyncCalendarCatalog(ctx context.Context, userID int
 		return nil, nil, err
 	}
 	return syncedConnections, syncedCatalog, nil
+}
+
+func (r *PostgresRepository) RefreshCalendarConnectionStatuses(ctx context.Context, userID int, updates []CalendarConnectionStatusUpdate, checkedAt string, transitionReason string) ([]CalendarConnection, error) {
+	if checkedAt == "" {
+		checkedAt = currentConnectionStatusWireTime()
+	}
+	if transitionReason == "" {
+		return nil, ErrInvalidCalendarStatusSnapshot
+	}
+	if err := validateCalendarConnectionStatusUpdatesForRepository(updates); err != nil {
+		return nil, err
+	}
+
+	var refreshed []CalendarConnection
+	if err := db.WithTx(ctx, r.pool, func(tx db.Tx) error {
+		existing, err := readCalendarConnectionsTx(ctx, tx, userID, true)
+		if err != nil {
+			return err
+		}
+		existingByRef := map[string]CalendarConnection{}
+		for _, connection := range existing {
+			existingByRef[connection.ConnectionRef] = connection
+		}
+
+		for _, update := range updates {
+			previous, ok := existingByRef[update.ConnectionRef]
+			if !ok || previous.Provider != update.Provider || previous.AccountRef != update.AccountRef {
+				return ErrInvalidCalendarStatusSnapshot
+			}
+			if _, err := tx.Exec(ctx, `
+				update calendar_connections
+				set status = $5,
+					status_code = nullif($6, ''),
+					status_checked_at = $7::timestamptz,
+					updated_at = now()
+				where user_id = $1
+					and connection_ref = $2
+					and provider = $3
+					and account_ref = $4
+			`, userID, update.ConnectionRef, update.Provider, update.AccountRef, update.Status, update.StatusCode, checkedAt); err != nil {
+				return fmt.Errorf("refresh calendar connection status: %w", err)
+			}
+			if previous.Status != update.Status {
+				if err := recordCalendarConnectionStatusTransitionTx(ctx, tx, userID, CalendarConnectionStatusTransition{
+					ConnectionRef:  update.ConnectionRef,
+					Provider:       update.Provider,
+					PreviousStatus: previous.Status,
+					NextStatus:     update.Status,
+					Reason:         transitionReason,
+				}); err != nil {
+					return err
+				}
+			}
+		}
+		refreshed, err = readCalendarConnectionsTx(ctx, tx, userID, false)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return refreshed, nil
 }
 
 func (r *PostgresRepository) ReadCatalogCalendars(ctx context.Context, userID int) ([]CatalogCalendar, error) {
@@ -425,7 +495,7 @@ func (r *PostgresRepository) readSelectedCalendar(ctx context.Context, userID in
 
 func readCalendarConnectionsTx(ctx context.Context, tx db.Tx, userID int, lockRows bool) ([]CalendarConnection, error) {
 	query := `
-		select connection_ref, provider, account_ref, account_email, status
+		select connection_ref, provider, account_ref, account_email, status, status_code, status_checked_at
 		from calendar_connections
 		where user_id = $1
 		order by connection_ref
@@ -442,8 +512,16 @@ func readCalendarConnectionsTx(ctx context.Context, tx db.Tx, userID int, lockRo
 	connections := []CalendarConnection{}
 	for rows.Next() {
 		var connection CalendarConnection
-		if err := rows.Scan(&connection.ConnectionRef, &connection.Provider, &connection.AccountRef, &connection.AccountEmail, &connection.Status); err != nil {
+		var statusCode sql.NullString
+		var statusCheckedAt sql.NullTime
+		if err := rows.Scan(&connection.ConnectionRef, &connection.Provider, &connection.AccountRef, &connection.AccountEmail, &connection.Status, &statusCode, &statusCheckedAt); err != nil {
 			return nil, fmt.Errorf("scan calendar connection: %w", err)
+		}
+		if statusCode.Valid {
+			connection.StatusCode = statusCode.String
+		}
+		if statusCheckedAt.Valid {
+			connection.StatusCheckedAt = formatCalendarWireTime(statusCheckedAt.Time)
 		}
 		connections = append(connections, connection)
 	}
@@ -504,6 +582,24 @@ func upsertCalendarConnectionTx(ctx context.Context, tx db.Tx, userID int, conne
 		return fmt.Errorf("save calendar connection: %w", err)
 	}
 	return nil
+}
+
+func validateCalendarConnectionStatusUpdatesForRepository(updates []CalendarConnectionStatusUpdate) error {
+	seen := map[string]struct{}{}
+	for _, update := range updates {
+		if update.ConnectionRef == "" || update.Provider == "" || update.AccountRef == "" || update.Status == "" {
+			return ErrInvalidCalendarStatusSnapshot
+		}
+		if _, ok := seen[update.ConnectionRef]; ok {
+			return ErrInvalidCalendarStatusSnapshot
+		}
+		seen[update.ConnectionRef] = struct{}{}
+	}
+	return nil
+}
+
+func formatCalendarWireTime(value time.Time) string {
+	return value.UTC().Format(statusWireTimeLayout)
 }
 
 func upsertCatalogCalendarTx(ctx context.Context, tx db.Tx, userID int, calendar CatalogCalendar) error {

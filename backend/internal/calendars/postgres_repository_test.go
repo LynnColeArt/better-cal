@@ -332,6 +332,75 @@ func TestPostgresStoreSyncsProviderCatalogAndRecordsStatusTransition(t *testing.
 	}
 }
 
+func TestPostgresRepositoryRefreshesCalendarConnectionStatus(t *testing.T) {
+	pool := testPostgresPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	userID := int(time.Now().UnixNano()%1_000_000_000) + 27_000
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_connection_status_history where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_catalog where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_connections where user_id = $1`, userID)
+	})
+
+	connection := CalendarConnection{
+		ConnectionRef: "google-connection-status",
+		Provider:      "google-calendar-fixture",
+		AccountRef:    "google-account-status",
+		AccountEmail:  "status@example.test",
+		Status:        "active",
+	}
+	if _, err := repo.SaveCalendarConnection(ctx, userID, connection); err != nil {
+		t.Fatal(err)
+	}
+
+	connections, err := repo.RefreshCalendarConnectionStatuses(ctx, userID, []CalendarConnectionStatusUpdate{
+		{
+			ConnectionRef: connection.ConnectionRef,
+			Provider:      connection.Provider,
+			AccountRef:    connection.AccountRef,
+			Status:        "reauth_required",
+			StatusCode:    "oauth_reauth_required",
+		},
+	}, "2026-04-24T12:00:00.000Z", "provider_status_refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connections) != 1 {
+		t.Fatalf("connection count = %d", len(connections))
+	}
+	if connections[0].Status != "reauth_required" {
+		t.Fatalf("status = %q", connections[0].Status)
+	}
+	if connections[0].StatusCode != "oauth_reauth_required" {
+		t.Fatalf("status code = %q", connections[0].StatusCode)
+	}
+	if connections[0].StatusCheckedAt != "2026-04-24T12:00:00.000Z" {
+		t.Fatalf("status checked at = %q", connections[0].StatusCheckedAt)
+	}
+
+	var previousStatus, nextStatus, reason string
+	if err := pool.QueryRow(ctx, `
+		select previous_status, next_status, reason
+		from calendar_connection_status_history
+		where user_id = $1 and connection_ref = $2
+		order by id desc
+		limit 1
+	`, userID, connection.ConnectionRef).Scan(&previousStatus, &nextStatus, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if previousStatus != "active" || nextStatus != "reauth_required" {
+		t.Fatalf("status transition = %q -> %q", previousStatus, nextStatus)
+	}
+	if reason != "provider_status_refresh" {
+		t.Fatalf("transition reason = %q", reason)
+	}
+}
+
 func TestPostgresRepositoryDeleteSelectedCalendarClearsDestination(t *testing.T) {
 	pool := testPostgresPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

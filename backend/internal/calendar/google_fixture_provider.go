@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/integrations"
 )
 
 const (
@@ -79,6 +81,32 @@ func (GoogleFixtureProvider) ReadCatalog(_ context.Context, input CatalogInput) 
 				ExternalID:    "google-calendar-team",
 				Name:          "Fixture Team Calendar",
 				Writable:      true,
+			},
+		},
+	}, nil
+}
+
+func (GoogleFixtureProvider) ReadStatus(_ context.Context, input integrations.StatusInput) (integrations.StatusSnapshot, error) {
+	if input.UserID != 123 {
+		return integrations.StatusSnapshot{}, nil
+	}
+	return integrations.StatusSnapshot{
+		Credentials: []integrations.CredentialStatus{
+			{
+				CredentialRef: "google-calendar-credential-fixture",
+				Provider:      googleFixtureProviderName,
+				AccountRef:    googleFixtureAccountRef,
+				Status:        "active",
+				StatusCode:    "ok",
+			},
+		},
+		CalendarConnections: []integrations.CalendarConnectionStatus{
+			{
+				ConnectionRef: googleFixtureConnectionRef,
+				Provider:      googleFixtureProviderName,
+				AccountRef:    googleFixtureAccountRef,
+				Status:        "active",
+				StatusCode:    "ok",
 			},
 		},
 	}, nil

@@ -5,34 +5,53 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"time"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/integrations"
 )
 
 const fixtureUserID = 123
 
-var ErrInvalidCredentialMetadata = errors.New("invalid credential metadata")
+var (
+	ErrInvalidCredentialMetadata       = errors.New("invalid credential metadata")
+	ErrCredentialStatusProviderUnset   = errors.New("credential status provider is not configured")
+	ErrInvalidCredentialStatusSnapshot = errors.New("invalid credential status snapshot")
+)
 
 type CredentialMetadata struct {
-	CredentialRef string   `json:"credentialRef"`
-	AppSlug       string   `json:"appSlug"`
-	AppCategory   string   `json:"appCategory"`
-	Provider      string   `json:"provider"`
-	AccountRef    string   `json:"accountRef"`
-	AccountLabel  string   `json:"accountLabel"`
-	Status        string   `json:"status"`
-	Scopes        []string `json:"scopes"`
-	CreatedAt     string   `json:"createdAt"`
-	UpdatedAt     string   `json:"updatedAt"`
+	CredentialRef   string   `json:"credentialRef"`
+	AppSlug         string   `json:"appSlug"`
+	AppCategory     string   `json:"appCategory"`
+	Provider        string   `json:"provider"`
+	AccountRef      string   `json:"accountRef"`
+	AccountLabel    string   `json:"accountLabel"`
+	Status          string   `json:"status"`
+	StatusCode      string   `json:"statusCode,omitempty"`
+	StatusCheckedAt string   `json:"statusCheckedAt,omitempty"`
+	Scopes          []string `json:"scopes"`
+	CreatedAt       string   `json:"createdAt"`
+	UpdatedAt       string   `json:"updatedAt"`
+}
+
+type CredentialStatusUpdate struct {
+	CredentialRef string
+	Provider      string
+	AccountRef    string
+	Status        string
+	StatusCode    string
 }
 
 type Repository interface {
 	ReadCredentialMetadata(ctx context.Context, userID int) ([]CredentialMetadata, error)
 	SaveCredentialMetadata(ctx context.Context, userID int, credential CredentialMetadata) (CredentialMetadata, error)
+	RefreshCredentialStatuses(ctx context.Context, userID int, updates []CredentialStatusUpdate, checkedAt string) ([]CredentialMetadata, error)
 }
 
 type Store struct {
-	mu          sync.Mutex
-	repo        Repository
-	credentials map[int][]CredentialMetadata
+	mu             sync.Mutex
+	repo           Repository
+	statusProvider integrations.StatusProviderAdapter
+	credentials    map[int][]CredentialMetadata
 }
 
 type StoreOption func(*Store)
@@ -40,6 +59,12 @@ type StoreOption func(*Store)
 func WithRepository(repo Repository) StoreOption {
 	return func(s *Store) {
 		s.repo = repo
+	}
+}
+
+func WithStatusProvider(provider integrations.StatusProviderAdapter) StoreOption {
+	return func(s *Store) {
+		s.statusProvider = provider
 	}
 }
 
@@ -80,6 +105,44 @@ func (s *Store) ReadCredentialMetadata(ctx context.Context, userID int) ([]Crede
 	return items, nil
 }
 
+func (s *Store) RefreshProviderStatus(ctx context.Context, userID int) error {
+	if s.statusProvider == nil {
+		return ErrCredentialStatusProviderUnset
+	}
+	snapshot, err := s.statusProvider.ReadStatus(ctx, integrations.StatusInput{UserID: userID})
+	if err != nil {
+		return err
+	}
+	updates, err := credentialStatusUpdatesFromProvider(snapshot.Credentials)
+	if err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.ensureLoadedLocked(ctx, userID); err != nil {
+		return err
+	}
+	checkedAt := currentWireTime()
+	if err := validateCredentialStatusUpdates(s.credentials[userID], updates); err != nil {
+		return err
+	}
+	if s.repo != nil {
+		refreshed, err := s.repo.RefreshCredentialStatuses(ctx, userID, updates, checkedAt)
+		if err != nil {
+			return err
+		}
+		s.credentials[userID] = cloneCredentialMetadata(refreshed)
+		return nil
+	}
+	s.credentials[userID] = applyCredentialStatusUpdates(s.credentials[userID], updates, checkedAt)
+	return nil
+}
+
 func (s *Store) ensureLoadedLocked(ctx context.Context, userID int) error {
 	if _, ok := s.credentials[userID]; ok {
 		return nil
@@ -116,6 +179,68 @@ func ValidateCredentialMetadata(credential CredentialMetadata) error {
 		return ErrInvalidCredentialMetadata
 	}
 	return nil
+}
+
+func credentialStatusUpdatesFromProvider(items []integrations.CredentialStatus) ([]CredentialStatusUpdate, error) {
+	updates := make([]CredentialStatusUpdate, 0, len(items))
+	for _, item := range items {
+		if item.CredentialRef == "" || item.Provider == "" || item.AccountRef == "" || item.Status == "" {
+			return nil, ErrInvalidCredentialStatusSnapshot
+		}
+		updates = append(updates, CredentialStatusUpdate{
+			CredentialRef: item.CredentialRef,
+			Provider:      item.Provider,
+			AccountRef:    item.AccountRef,
+			Status:        item.Status,
+			StatusCode:    item.StatusCode,
+		})
+	}
+	return updates, nil
+}
+
+func validateCredentialStatusUpdates(existing []CredentialMetadata, updates []CredentialStatusUpdate) error {
+	existingByRef := map[string]CredentialMetadata{}
+	for _, credential := range existing {
+		existingByRef[credential.CredentialRef] = credential
+	}
+	seen := map[string]struct{}{}
+	for _, update := range updates {
+		if update.CredentialRef == "" || update.Provider == "" || update.AccountRef == "" || update.Status == "" {
+			return ErrInvalidCredentialStatusSnapshot
+		}
+		if _, ok := seen[update.CredentialRef]; ok {
+			return ErrInvalidCredentialStatusSnapshot
+		}
+		seen[update.CredentialRef] = struct{}{}
+		credential, ok := existingByRef[update.CredentialRef]
+		if !ok || credential.Provider != update.Provider || credential.AccountRef != update.AccountRef {
+			return ErrInvalidCredentialStatusSnapshot
+		}
+	}
+	return nil
+}
+
+func applyCredentialStatusUpdates(existing []CredentialMetadata, updates []CredentialStatusUpdate, checkedAt string) []CredentialMetadata {
+	updatedByRef := map[string]CredentialStatusUpdate{}
+	for _, update := range updates {
+		updatedByRef[update.CredentialRef] = update
+	}
+	items := cloneCredentialMetadata(existing)
+	for index := range items {
+		update, ok := updatedByRef[items[index].CredentialRef]
+		if !ok {
+			continue
+		}
+		items[index].Status = update.Status
+		items[index].StatusCode = update.StatusCode
+		items[index].StatusCheckedAt = checkedAt
+		items[index].UpdatedAt = checkedAt
+	}
+	return items
+}
+
+func currentWireTime() string {
+	return time.Now().UTC().Format(wireTimeLayout)
 }
 
 func sortCredentialMetadata(items []CredentialMetadata) {

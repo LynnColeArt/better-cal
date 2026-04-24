@@ -75,6 +75,16 @@ func main() {
 			slog.Error("credential metadata seed failed", "error", err)
 			os.Exit(1)
 		}
+		integrationProvider := calendarprovider.NewGoogleFixtureProvider()
+		credentialStore := credentials.NewStoreWithRepository(
+			credentialRepository,
+			credentials.WithStatusProvider(integrationProvider),
+		)
+		if err := credentialStore.RefreshProviderStatus(ctx, auth.FixtureAPIKeyPrincipal().ID); err != nil {
+			cancel()
+			slog.Error("credential status refresh failed", "error", err)
+			os.Exit(1)
+		}
 		webhookSubscriptionStore := booking.NewPostgresWebhookSubscriptionStore(pool)
 		if err := booking.SeedWebhookSubscriptions(ctx, webhookSubscriptionStore, booking.FixtureWebhookSubscriptions(cfg.WebhookSubscriberURL, cfg.WebhookSigningKeyRef)); err != nil {
 			cancel()
@@ -100,15 +110,21 @@ func main() {
 			),
 		))
 		serverOptions = append(serverOptions, httpapi.WithCredentialStore(
-			credentials.NewStoreWithRepository(credentialRepository),
+			credentialStore,
 		))
 		calendarStore := calendars.NewStoreWithRepository(
 			calendars.NewPostgresRepository(pool),
-			calendars.WithCatalogProvider(calendarprovider.NewGoogleFixtureProvider()),
+			calendars.WithCatalogProvider(integrationProvider),
+			calendars.WithStatusProvider(integrationProvider),
 		)
 		if err := calendarStore.SyncProviderCatalog(ctx, auth.FixtureAPIKeyPrincipal().ID); err != nil {
 			cancel()
 			slog.Error("calendar catalog provider sync failed", "error", err)
+			os.Exit(1)
+		}
+		if err := calendarStore.RefreshProviderConnectionStatus(ctx, auth.FixtureAPIKeyPrincipal().ID); err != nil {
+			cancel()
+			slog.Error("calendar connection status refresh failed", "error", err)
 			os.Exit(1)
 		}
 		serverOptions = append(serverOptions, httpapi.WithCalendarStore(calendarStore))

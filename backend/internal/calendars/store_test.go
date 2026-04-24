@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	calendarprovider "github.com/LynnColeArt/better-cal/backend/internal/calendar"
+	"github.com/LynnColeArt/better-cal/backend/internal/integrations"
 )
 
 func TestStoreReadsFixtureConnectionsAndCatalog(t *testing.T) {
@@ -257,6 +258,59 @@ func TestStoreSyncRefreshesSelectedCalendarsFromProviderCatalog(t *testing.T) {
 	}
 }
 
+func TestStoreRefreshesCalendarConnectionStatusFromProvider(t *testing.T) {
+	store := NewStore(WithStatusProvider(staticStatusProvider{
+		snapshot: integrations.StatusSnapshot{
+			CalendarConnections: []integrations.CalendarConnectionStatus{
+				{
+					ConnectionRef: FixtureCalendarConnectionRef,
+					Provider:      "google-calendar-fixture",
+					AccountRef:    FixtureCalendarAccountRef,
+					Status:        "reauth_required",
+					StatusCode:    "oauth_reauth_required",
+				},
+			},
+		},
+	}))
+
+	if err := store.RefreshProviderConnectionStatus(context.Background(), fixtureUserID); err != nil {
+		t.Fatal(err)
+	}
+	connections, err := store.ReadCalendarConnections(context.Background(), fixtureUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connections[0].Status != "reauth_required" {
+		t.Fatalf("status = %q", connections[0].Status)
+	}
+	if connections[0].StatusCode != "oauth_reauth_required" {
+		t.Fatalf("status code = %q", connections[0].StatusCode)
+	}
+	if connections[0].StatusCheckedAt == "" {
+		t.Fatal("status checked timestamp was not set")
+	}
+}
+
+func TestStoreRejectsUnknownCalendarConnectionStatusRefresh(t *testing.T) {
+	store := NewStore(WithStatusProvider(staticStatusProvider{
+		snapshot: integrations.StatusSnapshot{
+			CalendarConnections: []integrations.CalendarConnectionStatus{
+				{
+					ConnectionRef: "missing-connection",
+					Provider:      "google-calendar-fixture",
+					AccountRef:    FixtureCalendarAccountRef,
+					Status:        "active",
+				},
+			},
+		},
+	}))
+
+	err := store.RefreshProviderConnectionStatus(context.Background(), fixtureUserID)
+	if !errors.Is(err, ErrInvalidCalendarStatusSnapshot) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestStoreRejectsInvalidProviderCatalogSnapshots(t *testing.T) {
 	validConnection := calendarprovider.CatalogConnection{
 		ConnectionRef: "provider-connection",
@@ -339,5 +393,13 @@ type staticCatalogProvider struct {
 }
 
 func (p staticCatalogProvider) ReadCatalog(context.Context, calendarprovider.CatalogInput) (calendarprovider.CatalogSnapshot, error) {
+	return p.snapshot, nil
+}
+
+type staticStatusProvider struct {
+	snapshot integrations.StatusSnapshot
+}
+
+func (p staticStatusProvider) ReadStatus(context.Context, integrations.StatusInput) (integrations.StatusSnapshot, error) {
 	return p.snapshot, nil
 }

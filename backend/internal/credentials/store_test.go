@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/integrations"
 )
 
 func TestStoreReadsFixtureCredentialMetadata(t *testing.T) {
@@ -75,4 +77,65 @@ func TestStoreClonesCredentialScopes(t *testing.T) {
 	if items[0].Scopes[0] == "mutated" {
 		t.Fatal("credential scopes were mutated through read result")
 	}
+}
+
+func TestStoreRefreshesCredentialStatusFromProvider(t *testing.T) {
+	store := NewStore(WithStatusProvider(staticStatusProvider{
+		snapshot: integrations.StatusSnapshot{
+			Credentials: []integrations.CredentialStatus{
+				{
+					CredentialRef: "google-calendar-credential-fixture",
+					Provider:      "google-calendar-fixture",
+					AccountRef:    "google-account-fixture",
+					Status:        "reauth_required",
+					StatusCode:    "oauth_reauth_required",
+				},
+			},
+		},
+	}))
+
+	if err := store.RefreshProviderStatus(context.Background(), fixtureUserID); err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ReadCredentialMetadata(context.Background(), fixtureUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Status != "reauth_required" {
+		t.Fatalf("status = %q", items[0].Status)
+	}
+	if items[0].StatusCode != "oauth_reauth_required" {
+		t.Fatalf("status code = %q", items[0].StatusCode)
+	}
+	if items[0].StatusCheckedAt == "" {
+		t.Fatal("status checked timestamp was not set")
+	}
+}
+
+func TestStoreRejectsUnknownCredentialStatusRefresh(t *testing.T) {
+	store := NewStore(WithStatusProvider(staticStatusProvider{
+		snapshot: integrations.StatusSnapshot{
+			Credentials: []integrations.CredentialStatus{
+				{
+					CredentialRef: "missing-credential",
+					Provider:      "google-calendar-fixture",
+					AccountRef:    "google-account-fixture",
+					Status:        "active",
+				},
+			},
+		},
+	}))
+
+	err := store.RefreshProviderStatus(context.Background(), fixtureUserID)
+	if !errors.Is(err, ErrInvalidCredentialStatusSnapshot) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type staticStatusProvider struct {
+	snapshot integrations.StatusSnapshot
+}
+
+func (p staticStatusProvider) ReadStatus(context.Context, integrations.StatusInput) (integrations.StatusSnapshot, error) {
+	return p.snapshot, nil
 }

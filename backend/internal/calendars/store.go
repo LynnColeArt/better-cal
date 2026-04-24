@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	calendarprovider "github.com/LynnColeArt/better-cal/backend/internal/calendar"
+	"github.com/LynnColeArt/better-cal/backend/internal/integrations"
 )
 
 const (
@@ -18,6 +20,8 @@ const (
 	FixtureDestinationCalendarRef = "destination-calendar-fixture"
 	FixtureTeamCalendarRef        = "team-calendar-fixture"
 	catalogSyncTransitionReason   = "provider_catalog_sync"
+	statusRefreshTransitionReason = "provider_status_refresh"
+	statusWireTimeLayout          = "2006-01-02T15:04:05.000Z"
 )
 
 var (
@@ -26,15 +30,19 @@ var (
 	ErrInvalidDestinationCalendarRef  = errors.New("invalid destination calendar ref")
 	ErrCalendarCatalogEntryNotFound   = errors.New("calendar catalog entry not found")
 	ErrCalendarCatalogProviderUnset   = errors.New("calendar catalog provider is not configured")
+	ErrCalendarStatusProviderUnset    = errors.New("calendar status provider is not configured")
 	ErrInvalidCalendarCatalogSnapshot = errors.New("invalid calendar catalog snapshot")
+	ErrInvalidCalendarStatusSnapshot  = errors.New("invalid calendar status snapshot")
 )
 
 type CalendarConnection struct {
-	ConnectionRef string `json:"connectionRef"`
-	Provider      string `json:"provider"`
-	AccountRef    string `json:"accountRef"`
-	AccountEmail  string `json:"accountEmail"`
-	Status        string `json:"status"`
+	ConnectionRef   string `json:"connectionRef"`
+	Provider        string `json:"provider"`
+	AccountRef      string `json:"accountRef"`
+	AccountEmail    string `json:"accountEmail"`
+	Status          string `json:"status"`
+	StatusCode      string `json:"statusCode,omitempty"`
+	StatusCheckedAt string `json:"statusCheckedAt,omitempty"`
 }
 
 type CatalogCalendar struct {
@@ -53,6 +61,14 @@ type CalendarConnectionStatusTransition struct {
 	PreviousStatus string
 	NextStatus     string
 	Reason         string
+}
+
+type CalendarConnectionStatusUpdate struct {
+	ConnectionRef string
+	Provider      string
+	AccountRef    string
+	Status        string
+	StatusCode    string
 }
 
 type SelectedCalendar struct {
@@ -78,6 +94,7 @@ type Repository interface {
 	ReadCalendarConnections(ctx context.Context, userID int) ([]CalendarConnection, error)
 	SaveCalendarConnection(ctx context.Context, userID int, connection CalendarConnection) (CalendarConnection, error)
 	SyncCalendarCatalog(ctx context.Context, userID int, connections []CalendarConnection, catalog []CatalogCalendar, transitionReason string) ([]CalendarConnection, []CatalogCalendar, error)
+	RefreshCalendarConnectionStatuses(ctx context.Context, userID int, updates []CalendarConnectionStatusUpdate, checkedAt string, transitionReason string) ([]CalendarConnection, error)
 	ReadCatalogCalendars(ctx context.Context, userID int) ([]CatalogCalendar, error)
 	SaveCatalogCalendar(ctx context.Context, userID int, calendar CatalogCalendar) (CatalogCalendar, error)
 	ReadCatalogCalendar(ctx context.Context, userID int, calendarRef string) (CatalogCalendar, bool, error)
@@ -92,6 +109,7 @@ type Store struct {
 	mu              sync.Mutex
 	repo            Repository
 	catalogProvider calendarprovider.CatalogProviderAdapter
+	statusProvider  integrations.StatusProviderAdapter
 	connections     map[int][]CalendarConnection
 	catalog         map[int][]CatalogCalendar
 	selected        map[int][]SelectedCalendar
@@ -109,6 +127,12 @@ func WithRepository(repo Repository) StoreOption {
 func WithCatalogProvider(provider calendarprovider.CatalogProviderAdapter) StoreOption {
 	return func(s *Store) {
 		s.catalogProvider = provider
+	}
+}
+
+func WithStatusProvider(provider integrations.StatusProviderAdapter) StoreOption {
+	return func(s *Store) {
+		s.statusProvider = provider
 	}
 }
 
@@ -169,6 +193,44 @@ func (s *Store) SyncProviderCatalog(ctx context.Context, userID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.applyProviderCatalogLocked(ctx, userID, connections, catalog)
+}
+
+func (s *Store) RefreshProviderConnectionStatus(ctx context.Context, userID int) error {
+	if s.statusProvider == nil {
+		return ErrCalendarStatusProviderUnset
+	}
+	snapshot, err := s.statusProvider.ReadStatus(ctx, integrations.StatusInput{UserID: userID})
+	if err != nil {
+		return err
+	}
+	updates, err := calendarConnectionStatusUpdatesFromProvider(snapshot.CalendarConnections)
+	if err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.ensureLoadedLocked(ctx, userID); err != nil {
+		return err
+	}
+	checkedAt := currentConnectionStatusWireTime()
+	if err := validateCalendarConnectionStatusUpdates(s.connections[userID], updates); err != nil {
+		return err
+	}
+	if s.repo != nil {
+		connections, err := s.repo.RefreshCalendarConnectionStatuses(ctx, userID, updates, checkedAt, statusRefreshTransitionReason)
+		if err != nil {
+			return err
+		}
+		s.connections[userID] = cloneCalendarConnections(connections)
+		return nil
+	}
+	s.connections[userID] = applyCalendarConnectionStatusUpdates(s.connections[userID], updates, checkedAt)
+	return nil
 }
 
 func (s *Store) ReadSelectedCalendars(ctx context.Context, userID int) ([]SelectedCalendar, error) {
@@ -518,6 +580,12 @@ func sortCalendarConnections(items []CalendarConnection) {
 	})
 }
 
+func cloneCalendarConnections(items []CalendarConnection) []CalendarConnection {
+	cloned := append([]CalendarConnection(nil), items...)
+	sortCalendarConnections(cloned)
+	return cloned
+}
+
 func sortCatalogCalendars(items []CatalogCalendar) {
 	slices.SortFunc(items, func(left CatalogCalendar, right CatalogCalendar) int {
 		switch {
@@ -529,6 +597,67 @@ func sortCatalogCalendars(items []CatalogCalendar) {
 			return 0
 		}
 	})
+}
+
+func calendarConnectionStatusUpdatesFromProvider(items []integrations.CalendarConnectionStatus) ([]CalendarConnectionStatusUpdate, error) {
+	updates := make([]CalendarConnectionStatusUpdate, 0, len(items))
+	for _, item := range items {
+		if item.ConnectionRef == "" || item.Provider == "" || item.AccountRef == "" || item.Status == "" {
+			return nil, ErrInvalidCalendarStatusSnapshot
+		}
+		updates = append(updates, CalendarConnectionStatusUpdate{
+			ConnectionRef: item.ConnectionRef,
+			Provider:      item.Provider,
+			AccountRef:    item.AccountRef,
+			Status:        item.Status,
+			StatusCode:    item.StatusCode,
+		})
+	}
+	return updates, nil
+}
+
+func validateCalendarConnectionStatusUpdates(existing []CalendarConnection, updates []CalendarConnectionStatusUpdate) error {
+	existingByRef := map[string]CalendarConnection{}
+	for _, connection := range existing {
+		existingByRef[connection.ConnectionRef] = connection
+	}
+	seen := map[string]struct{}{}
+	for _, update := range updates {
+		if update.ConnectionRef == "" || update.Provider == "" || update.AccountRef == "" || update.Status == "" {
+			return ErrInvalidCalendarStatusSnapshot
+		}
+		if _, ok := seen[update.ConnectionRef]; ok {
+			return ErrInvalidCalendarStatusSnapshot
+		}
+		seen[update.ConnectionRef] = struct{}{}
+		connection, ok := existingByRef[update.ConnectionRef]
+		if !ok || connection.Provider != update.Provider || connection.AccountRef != update.AccountRef {
+			return ErrInvalidCalendarStatusSnapshot
+		}
+	}
+	return nil
+}
+
+func applyCalendarConnectionStatusUpdates(existing []CalendarConnection, updates []CalendarConnectionStatusUpdate, checkedAt string) []CalendarConnection {
+	updatedByRef := map[string]CalendarConnectionStatusUpdate{}
+	for _, update := range updates {
+		updatedByRef[update.ConnectionRef] = update
+	}
+	connections := cloneCalendarConnections(existing)
+	for index := range connections {
+		update, ok := updatedByRef[connections[index].ConnectionRef]
+		if !ok {
+			continue
+		}
+		connections[index].Status = update.Status
+		connections[index].StatusCode = update.StatusCode
+		connections[index].StatusCheckedAt = checkedAt
+	}
+	return connections
+}
+
+func currentConnectionStatusWireTime() string {
+	return time.Now().UTC().Format(statusWireTimeLayout)
 }
 
 func calendarConnectionsFromProvider(items []calendarprovider.CatalogConnection) ([]CalendarConnection, error) {

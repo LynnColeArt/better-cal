@@ -2,9 +2,11 @@ package credentials
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,7 +22,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) ReadCredentialMetadata(ctx context.Context, userID int) ([]CredentialMetadata, error) {
 	rows, err := r.pool.Query(ctx, `
-		select credential_ref, app_slug, app_category, provider, account_ref, account_label, status, scopes, created_at, updated_at
+		select credential_ref, app_slug, app_category, provider, account_ref, account_label, status, status_code, status_checked_at, scopes, created_at, updated_at
 		from integration_credential_metadata
 		where user_id = $1
 		order by credential_ref
@@ -33,6 +35,8 @@ func (r *PostgresRepository) ReadCredentialMetadata(ctx context.Context, userID 
 	credentials := []CredentialMetadata{}
 	for rows.Next() {
 		var credential CredentialMetadata
+		var statusCode sql.NullString
+		var statusCheckedAt sql.NullTime
 		var createdAt time.Time
 		var updatedAt time.Time
 		if err := rows.Scan(
@@ -43,11 +47,19 @@ func (r *PostgresRepository) ReadCredentialMetadata(ctx context.Context, userID 
 			&credential.AccountRef,
 			&credential.AccountLabel,
 			&credential.Status,
+			&statusCode,
+			&statusCheckedAt,
 			&credential.Scopes,
 			&createdAt,
 			&updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan credential metadata: %w", err)
+		}
+		if statusCode.Valid {
+			credential.StatusCode = statusCode.String
+		}
+		if statusCheckedAt.Valid {
+			credential.StatusCheckedAt = formatWireTime(statusCheckedAt.Time)
 		}
 		credential.CreatedAt = formatWireTime(createdAt)
 		credential.UpdatedAt = formatWireTime(updatedAt)
@@ -104,6 +116,55 @@ func (r *PostgresRepository) SaveCredentialMetadata(ctx context.Context, userID 
 		}
 	}
 	return CredentialMetadata{}, fmt.Errorf("saved credential metadata %q was not found", credential.CredentialRef)
+}
+
+func (r *PostgresRepository) RefreshCredentialStatuses(ctx context.Context, userID int, updates []CredentialStatusUpdate, checkedAt string) ([]CredentialMetadata, error) {
+	if checkedAt == "" {
+		checkedAt = currentWireTime()
+	}
+	if err := validateCredentialStatusUpdatesForRepository(updates); err != nil {
+		return nil, err
+	}
+
+	if err := db.WithTx(ctx, r.pool, func(tx db.Tx) error {
+		for _, update := range updates {
+			tag, err := tx.Exec(ctx, `
+				update integration_credential_metadata
+				set status = $5,
+					status_code = nullif($6, ''),
+					status_checked_at = $7::timestamptz,
+					updated_at = now()
+				where user_id = $1
+					and credential_ref = $2
+					and provider = $3
+					and account_ref = $4
+			`, userID, update.CredentialRef, update.Provider, update.AccountRef, update.Status, update.StatusCode, checkedAt)
+			if err != nil {
+				return fmt.Errorf("refresh credential status: %w", err)
+			}
+			if tag.RowsAffected() != 1 {
+				return ErrInvalidCredentialStatusSnapshot
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return r.ReadCredentialMetadata(ctx, userID)
+}
+
+func validateCredentialStatusUpdatesForRepository(updates []CredentialStatusUpdate) error {
+	seen := map[string]struct{}{}
+	for _, update := range updates {
+		if update.CredentialRef == "" || update.Provider == "" || update.AccountRef == "" || update.Status == "" {
+			return ErrInvalidCredentialStatusSnapshot
+		}
+		if _, ok := seen[update.CredentialRef]; ok {
+			return ErrInvalidCredentialStatusSnapshot
+		}
+		seen[update.CredentialRef] = struct{}{}
+	}
+	return nil
 }
 
 func formatWireTime(value time.Time) string {

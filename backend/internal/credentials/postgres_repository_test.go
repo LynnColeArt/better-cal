@@ -59,6 +59,59 @@ func TestPostgresRepositoryRoundTripCredentialMetadata(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositoryRefreshesCredentialStatus(t *testing.T) {
+	pool := testPostgresPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	userID := int(time.Now().UnixNano()%1_000_000_000) + 45_000
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from integration_credential_metadata where user_id = $1`, userID)
+	})
+
+	credential := CredentialMetadata{
+		CredentialRef: "credential-status-fixture",
+		AppSlug:       "google-calendar",
+		AppCategory:   "calendar",
+		Provider:      "google-calendar-fixture",
+		AccountRef:    "google-account-status",
+		AccountLabel:  "status@example.test",
+		Status:        "active",
+		Scopes:        []string{"calendar.read"},
+	}
+	if _, err := repo.SaveCredentialMetadata(ctx, userID, credential); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshed, err := repo.RefreshCredentialStatuses(ctx, userID, []CredentialStatusUpdate{
+		{
+			CredentialRef: credential.CredentialRef,
+			Provider:      credential.Provider,
+			AccountRef:    credential.AccountRef,
+			Status:        "reauth_required",
+			StatusCode:    "oauth_reauth_required",
+		},
+	}, "2026-04-24T12:00:00.000Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refreshed) != 1 {
+		t.Fatalf("credential metadata count = %d", len(refreshed))
+	}
+	if refreshed[0].Status != "reauth_required" {
+		t.Fatalf("status = %q", refreshed[0].Status)
+	}
+	if refreshed[0].StatusCode != "oauth_reauth_required" {
+		t.Fatalf("status code = %q", refreshed[0].StatusCode)
+	}
+	if refreshed[0].StatusCheckedAt != "2026-04-24T12:00:00.000Z" {
+		t.Fatalf("status checked at = %q", refreshed[0].StatusCheckedAt)
+	}
+}
+
 func TestPostgresCredentialMetadataTableHasNoSecretColumns(t *testing.T) {
 	pool := testPostgresPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
