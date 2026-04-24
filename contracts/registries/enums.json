@@ -16,7 +16,7 @@
     {
       "id": "enum.auth.mode",
       "status": "draft",
-      "values": ["none", "api-key", "platform-client-secret", "platform-access-token", "third-party-access-token", "session", "oauth-client", "public-pkce-client", "public-booking-token"]
+      "values": ["none", "api-key", "platform-client-secret", "platform-access-token", "oauth-access-token", "third-party-access-token", "session", "oauth-client", "public-pkce-client", "public-booking-token"]
     },
     {
       "id": "enum.secret.class",

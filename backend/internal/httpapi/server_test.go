@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 )
@@ -350,6 +351,24 @@ func TestOAuthTokenExchangeConsumesAuthorizationCode(t *testing.T) {
 	if bytes.Contains(responseBody, []byte("mock-oauth-authorization-code")) {
 		t.Fatalf("response echoed authorization code: %s", responseBody)
 	}
+	var tokenResponse map[string]any
+	if err := json.Unmarshal(responseBody, &tokenResponse); err != nil {
+		t.Fatal(err)
+	}
+	accessToken, _ := tokenResponse["access_token"].(string)
+	if accessToken == "" {
+		t.Fatalf("missing access token in response: %s", responseBody)
+	}
+
+	readReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/bookings/mock-booking-personal-basic", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readReq.Header.Set("authorization", "Bearer "+accessToken)
+	resp, responseBody = do(t, readReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("oauth access-token booking read status = %d, body = %s", resp.StatusCode, responseBody)
+	}
 
 	req, err = http.NewRequest(http.MethodPost, server.URL+"/v2/auth/oauth2/token", bytes.NewReader(body))
 	if err != nil {
@@ -367,6 +386,21 @@ func TestOAuthTokenExchangeConsumesAuthorizationCode(t *testing.T) {
 	if bytes.Contains(responseBody, []byte("mock-oauth-authorization-code")) {
 		t.Fatalf("replay response echoed authorization code: %s", responseBody)
 	}
+}
+
+func TestOAuthAccessTokenRequiresBookingReadScope(t *testing.T) {
+	principal := auth.FixtureAPIKeyPrincipal()
+	principal.Permissions = []string{"booking:write"}
+	service := auth.NewService(testConfig(), auth.WithOAuthTokenExchangeRepository(staticOAuthTokens{
+		byToken: map[string]auth.Principal{
+			"write-only-token": principal,
+		},
+	}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodGet, "/v2/bookings/mock-booking-personal-basic", "Bearer write-only-token", nil, http.StatusForbidden)
 }
 
 func TestRequestIDPropagatesToResponse(t *testing.T) {
@@ -491,6 +525,23 @@ type erroringOAuthClients struct{}
 
 func (erroringOAuthClients) ReadOAuthClient(context.Context, string) (auth.OAuthClient, bool, error) {
 	return auth.OAuthClient{}, false, errors.New("oauth repository unavailable")
+}
+
+type staticOAuthTokens struct {
+	byToken map[string]auth.Principal
+	err     error
+}
+
+func (t staticOAuthTokens) ExchangeOAuthAuthorizationCode(context.Context, auth.OAuthTokenExchangeRequest, time.Time) (auth.OAuthTokenResponse, error) {
+	return auth.OAuthTokenResponse{}, errors.New("unused exchange path")
+}
+
+func (t staticOAuthTokens) ReadOAuthAccessTokenPrincipal(_ context.Context, token string, _ time.Time) (auth.Principal, bool, error) {
+	if t.err != nil {
+		return auth.Principal{}, false, t.err
+	}
+	principal, ok := t.byToken[token]
+	return principal, ok, nil
 }
 
 type erroringPlatformClients struct{}

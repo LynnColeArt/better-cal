@@ -170,6 +170,39 @@ func TestExchangeOAuthTokenConsumesFixtureAuthorizationCode(t *testing.T) {
 	}
 }
 
+func TestAuthenticateOAuthAccessTokenUsesScopedFixturePermissions(t *testing.T) {
+	service := NewService(testConfig())
+	token, err := service.ExchangeOAuthToken(context.Background(), OAuthTokenExchangeRequest{
+		GrantType:   "authorization_code",
+		ClientID:    "mock-oauth-client",
+		Code:        FixtureOAuthAuthorizationCode,
+		RedirectURI: "https://fixture.example.test/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	principal, ok, err := service.AuthenticateOAuthAccessTokenContext(context.Background(), "Bearer "+token.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected issued access token to authenticate")
+	}
+	if !hasPrincipalPermission(principal.Permissions, "booking:read") || !hasPrincipalPermission(principal.Permissions, "booking:write") {
+		t.Fatalf("permissions = %#v", principal.Permissions)
+	}
+	if hasPrincipalPermission(principal.Permissions, "me:read") {
+		t.Fatalf("oauth access token unexpectedly retained unscoped permission: %#v", principal.Permissions)
+	}
+
+	if _, ok, err := service.AuthenticateOAuthAccessTokenContext(context.Background(), "Bearer missing-token"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("missing oauth access token unexpectedly authenticated")
+	}
+}
+
 func TestExchangeOAuthTokenRejectsInvalidInputs(t *testing.T) {
 	service := NewService(testConfig())
 

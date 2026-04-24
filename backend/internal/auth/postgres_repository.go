@@ -32,6 +32,7 @@ type OAuthClientRepository interface {
 
 type OAuthTokenExchangeRepository interface {
 	ExchangeOAuthAuthorizationCode(ctx context.Context, req OAuthTokenExchangeRequest, issuedAt time.Time) (OAuthTokenResponse, error)
+	ReadOAuthAccessTokenPrincipal(ctx context.Context, token string, now time.Time) (Principal, bool, error)
 }
 
 type PlatformClientRecord struct {
@@ -323,6 +324,55 @@ func (r *PostgresRepository) ExchangeOAuthAuthorizationCode(ctx context.Context,
 		return OAuthTokenResponse{}, err
 	}
 	return response, nil
+}
+
+func (r *PostgresRepository) ReadOAuthAccessTokenPrincipal(ctx context.Context, token string, now time.Time) (Principal, bool, error) {
+	if token == "" {
+		return Principal{}, false, nil
+	}
+
+	var principal Principal
+	var permissions []string
+	var scopes []string
+	var createdAt time.Time
+	var updatedAt time.Time
+	err := r.pool.QueryRow(ctx, `
+		select
+			user_id,
+			user_uuid,
+			principal_type,
+			username,
+			email,
+			permissions,
+			scopes,
+			created_at,
+			updated_at
+		from oauth_tokens
+		where access_token_sha256 = $1
+			and access_expires_at > $2
+			and revoked_at is null
+	`, sha256Hex(token), now).Scan(
+		&principal.ID,
+		&principal.UUID,
+		&principal.Type,
+		&principal.Username,
+		&principal.Email,
+		&permissions,
+		&scopes,
+		&createdAt,
+		&updatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Principal{}, false, nil
+	}
+	if err != nil {
+		return Principal{}, false, fmt.Errorf("read oauth access token principal: %w", err)
+	}
+
+	principal.Permissions = intersectStrings(permissions, scopes)
+	principal.CreatedAt = formatWireTime(createdAt)
+	principal.UpdatedAt = formatWireTime(updatedAt)
+	return principal, true, nil
 }
 
 func (r *PostgresRepository) ReadPlatformClient(ctx context.Context, clientID string) (PlatformClientRecord, bool, error) {

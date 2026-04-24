@@ -197,6 +197,24 @@ func TestPostgresRepositoryExchangesOAuthAuthorizationCodeOnce(t *testing.T) {
 	if token.Scope != "booking:read booking:write" {
 		t.Fatalf("scope = %q", token.Scope)
 	}
+	principal, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, token.AccessToken, time.Date(2026, 4, 24, 12, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("issued oauth access token did not authenticate")
+	}
+	if principal.ID != FixtureAPIKeyPrincipal().ID || principal.Email != "fixture-user@example.test" {
+		t.Fatalf("principal = %#v", principal)
+	}
+	if len(principal.Permissions) != 2 || principal.Permissions[0] != "booking:read" || principal.Permissions[1] != "booking:write" {
+		t.Fatalf("scoped permissions = %#v", principal.Permissions)
+	}
+	if _, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, token.AccessToken+"-missing", time.Date(2026, 4, 24, 12, 1, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("missing oauth access token unexpectedly authenticated")
+	}
 
 	if _, err := repo.ExchangeOAuthAuthorizationCode(ctx, OAuthTokenExchangeRequest{
 		GrantType:   "authorization_code",
@@ -242,6 +260,33 @@ func TestPostgresRepositoryExchangesOAuthAuthorizationCodeOnce(t *testing.T) {
 	}
 	if !consumed {
 		t.Fatal("authorization code was not marked consumed")
+	}
+
+	if _, err := pool.Exec(ctx, `
+		update oauth_tokens
+		set access_expires_at = $2
+		where access_token_sha256 = $1
+	`, sha256Hex(token.AccessToken), time.Date(2026, 4, 24, 11, 59, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, token.AccessToken, time.Date(2026, 4, 24, 12, 1, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("expired oauth access token unexpectedly authenticated")
+	}
+
+	if _, err := pool.Exec(ctx, `
+		update oauth_tokens
+		set access_expires_at = $2,
+			revoked_at = $3
+		where access_token_sha256 = $1
+	`, sha256Hex(token.AccessToken), time.Date(2026, 4, 24, 13, 0, 0, 0, time.UTC), time.Date(2026, 4, 24, 12, 2, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, token.AccessToken, time.Date(2026, 4, 24, 12, 3, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("revoked oauth access token unexpectedly authenticated")
 	}
 }
 

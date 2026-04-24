@@ -67,6 +67,11 @@ type OAuthTokenResponse struct {
 	Scope        string
 }
 
+type OAuthAccessTokenRecord struct {
+	Principal Principal
+	ExpiresAt time.Time
+}
+
 type PlatformClient struct {
 	ID                string
 	Name              string
@@ -95,6 +100,7 @@ type Service struct {
 	oauthTokens          OAuthTokenExchangeRepository
 	platformClients      PlatformClientRepository
 	fixtureOAuthCodes    map[string]OAuthAuthorizationCode
+	fixtureOAuthTokens   map[string]OAuthAccessTokenRecord
 }
 
 const (
@@ -153,6 +159,7 @@ func NewService(cfg config.Config, opts ...ServiceOption) *Service {
 		service.fixtureOAuthCodes = map[string]OAuthAuthorizationCode{
 			code.Code: code,
 		}
+		service.fixtureOAuthTokens = map[string]OAuthAccessTokenRecord{}
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -294,6 +301,18 @@ func (s *Service) ExchangeOAuthToken(ctx context.Context, req OAuthTokenExchange
 	return s.exchangeFixtureOAuthAuthorizationCode(req, time.Now().UTC())
 }
 
+func (s *Service) AuthenticateOAuthAccessTokenContext(ctx context.Context, authorization string) (Principal, bool, error) {
+	token := bearerToken(authorization)
+	if token == "" {
+		return Principal{}, false, nil
+	}
+
+	if s.oauthTokens != nil {
+		return s.oauthTokens.ReadOAuthAccessTokenPrincipal(ctx, token, time.Now().UTC())
+	}
+	return s.authenticateFixtureOAuthAccessToken(token, time.Now().UTC())
+}
+
 func (s *Service) exchangeFixtureOAuthAuthorizationCode(req OAuthTokenExchangeRequest, issuedAt time.Time) (OAuthTokenResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -313,7 +332,32 @@ func (s *Service) exchangeFixtureOAuthAuthorizationCode(req OAuthTokenExchangeRe
 		return OAuthTokenResponse{}, ErrOAuthGrantExpired
 	}
 	delete(s.fixtureOAuthCodes, req.Code)
-	return newOAuthTokenResponse(code.Scopes)
+	token, err := newOAuthTokenResponse(code.Scopes)
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	if s.fixtureOAuthTokens == nil {
+		s.fixtureOAuthTokens = map[string]OAuthAccessTokenRecord{}
+	}
+	s.fixtureOAuthTokens[token.AccessToken] = OAuthAccessTokenRecord{
+		Principal: scopedOAuthPrincipal(code.Principal, code.Scopes),
+		ExpiresAt: issuedAt.Add(oauthAccessTokenTTL),
+	}
+	return token, nil
+}
+
+func (s *Service) authenticateFixtureOAuthAccessToken(token string, now time.Time) (Principal, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.fixtureOAuthTokens[token]
+	if !ok {
+		return Principal{}, false, nil
+	}
+	if !now.Before(record.ExpiresAt) {
+		return Principal{}, false, nil
+	}
+	return record.Principal, true, nil
 }
 
 func hasRedirectURI(redirectURIs []string, redirectURI string) bool {
@@ -341,6 +385,29 @@ func newOAuthTokenResponse(scopes []string) (OAuthTokenResponse, error) {
 		ExpiresIn:    int(oauthAccessTokenTTL.Seconds()),
 		Scope:        strings.Join(scopes, " "),
 	}, nil
+}
+
+func scopedOAuthPrincipal(principal Principal, scopes []string) Principal {
+	scoped := principal
+	scoped.Permissions = intersectStrings(principal.Permissions, scopes)
+	return scoped
+}
+
+func intersectStrings(left []string, right []string) []string {
+	if len(left) == 0 || len(right) == 0 {
+		return []string{}
+	}
+	rightSet := make(map[string]struct{}, len(right))
+	for _, value := range right {
+		rightSet[value] = struct{}{}
+	}
+	result := make([]string, 0, len(left))
+	for _, value := range left {
+		if _, ok := rightSet[value]; ok {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func randomOAuthToken(prefix string) (string, error) {

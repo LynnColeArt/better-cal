@@ -200,6 +200,14 @@ func (s *Server) authenticateAPIKey(r *http.Request) (auth.Principal, bool, erro
 	return s.authenticator().AuthenticateAPIKeyContext(r.Context(), r.Header.Get("authorization"))
 }
 
+func (s *Server) authenticateAPIKeyOrOAuthAccessToken(r *http.Request) (auth.Principal, bool, error) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil || ok {
+		return principal, ok, err
+	}
+	return s.authenticator().AuthenticateOAuthAccessTokenContext(r.Context(), r.Header.Get("authorization"))
+}
+
 func (s *Server) authenticator() *auth.Service {
 	if s.authService != nil {
 		return s.authService

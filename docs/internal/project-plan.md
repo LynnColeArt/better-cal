@@ -198,10 +198,10 @@ Goal: expose the external API as a compatible Go service.
 Deliverables:
 
 - API v2 routes with matching versioned DTOs;
-- OAuth2 authorization, token exchange, refresh, and provider endpoints; the first `POST /v2/auth/oauth2/token` canary now supports authorization-code exchange for the fixture OAuth client, consumes codes atomically, returns newly issued access and refresh tokens only in the successful response, and stores authorization codes plus issued tokens only as SHA-256 hashes;
+- OAuth2 authorization, token exchange, refresh, and provider endpoints; the first `POST /v2/auth/oauth2/token` canary now supports authorization-code exchange for the fixture OAuth client, consumes codes atomically, returns newly issued access and refresh tokens only in the successful response, stores authorization codes plus issued tokens only as SHA-256 hashes, and resolves valid unexpired and unrevoked access tokens into scope-limited principals for `GET /v2/bookings/{bookingUid}`;
 - platform OAuth clients, managed users, tokens, permissions, and webhooks;
 - API key refresh and validation;
-- atomic authorization code consumption; started with the fixture authorization-code exchange canary and replay-denial tests;
+- atomic authorization code consumption; started with the fixture authorization-code exchange canary, replay-denial tests, and hashed access-token authentication tests for booking reads;
 - secret rotation and hashed platform OAuth client secrets.
 
 References:
