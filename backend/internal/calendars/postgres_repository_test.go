@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	calendarprovider "github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -183,6 +184,154 @@ func TestPostgresRepositoryRoundTripSelectedAndDestinationCalendars(t *testing.T
 	}
 }
 
+func TestPostgresStoreSyncsProviderCatalogAndRecordsStatusTransition(t *testing.T) {
+	pool := testPostgresPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	userID := int(time.Now().UnixNano()%1_000_000_000) + 25_000
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from destination_calendars where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from selected_calendars where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_connection_status_history where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_catalog where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_connections where user_id = $1`, userID)
+	})
+
+	provider := &mutableCatalogProvider{
+		snapshot: calendarprovider.CatalogSnapshot{
+			Connections: []calendarprovider.CatalogConnection{
+				{
+					ConnectionRef: "google-connection",
+					Provider:      "google-calendar-fixture",
+					AccountRef:    "google-account",
+					AccountEmail:  "fixture-user@example.test",
+					Status:        "active",
+				},
+				{
+					ConnectionRef: "stale-connection",
+					Provider:      "google-calendar-fixture",
+					AccountRef:    "stale-account",
+					AccountEmail:  "stale-user@example.test",
+					Status:        "active",
+				},
+			},
+			Calendars: []calendarprovider.CatalogCalendar{
+				{
+					CalendarRef:   "team-calendar",
+					ConnectionRef: "google-connection",
+					Provider:      "google-calendar-fixture",
+					ExternalID:    "google-team-calendar",
+					Name:          "Team Calendar",
+					Writable:      true,
+				},
+				{
+					CalendarRef:   "stale-calendar",
+					ConnectionRef: "stale-connection",
+					Provider:      "google-calendar-fixture",
+					ExternalID:    "google-stale-calendar",
+					Name:          "Stale Calendar",
+					Writable:      true,
+				},
+			},
+		},
+	}
+	store := NewStoreWithRepository(repo, WithCatalogProvider(provider))
+
+	if err := store.SyncProviderCatalog(ctx, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveSelectedCalendar(ctx, userID, SaveSelectedCalendarRequest{CalendarRef: "team-calendar"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveSelectedCalendar(ctx, userID, SaveSelectedCalendarRequest{CalendarRef: "stale-calendar"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.SetDestinationCalendar(ctx, userID, "stale-calendar"); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("destination calendar was not set")
+	}
+	provider.snapshot.Connections = []calendarprovider.CatalogConnection{
+		{
+			ConnectionRef: "google-connection",
+			Provider:      "google-calendar-fixture",
+			AccountRef:    "google-account",
+			AccountEmail:  "fixture-user@example.test",
+			Status:        "disconnected",
+		},
+	}
+	provider.snapshot.Calendars = []calendarprovider.CatalogCalendar{
+		{
+			CalendarRef:   "team-calendar",
+			ConnectionRef: "google-connection",
+			Provider:      "google-calendar-fixture",
+			ExternalID:    "google-team-calendar-updated",
+			Name:          "Team Calendar Updated",
+			Writable:      true,
+		},
+	}
+	if err := store.SyncProviderCatalog(ctx, userID); err != nil {
+		t.Fatal(err)
+	}
+
+	connections, err := repo.ReadCalendarConnections(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connections) != 1 {
+		t.Fatalf("connection count = %d", len(connections))
+	}
+	if connections[0].Status != "disconnected" {
+		t.Fatalf("connection status = %q", connections[0].Status)
+	}
+	catalog, err := repo.ReadCatalogCalendars(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) != 1 {
+		t.Fatalf("catalog count = %d", len(catalog))
+	}
+	if catalog[0].Name != "Team Calendar Updated" {
+		t.Fatalf("catalog name = %q", catalog[0].Name)
+	}
+	selected, err := repo.ReadSelectedCalendars(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("selected calendar count = %d", len(selected))
+	}
+	if selected[0].CalendarRef != "team-calendar" || selected[0].ExternalID != "google-team-calendar-updated" {
+		t.Fatalf("selected calendar = %#v", selected[0])
+	}
+	if _, ok, err := repo.ReadDestinationCalendar(ctx, userID); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("stale destination calendar was not cleared")
+	}
+
+	var previousStatus, nextStatus, reason string
+	if err := pool.QueryRow(ctx, `
+		select previous_status, next_status, reason
+		from calendar_connection_status_history
+		where user_id = $1 and connection_ref = $2
+		order by id desc
+		limit 1
+	`, userID, "google-connection").Scan(&previousStatus, &nextStatus, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if previousStatus != "active" || nextStatus != "disconnected" {
+		t.Fatalf("status transition = %q -> %q", previousStatus, nextStatus)
+	}
+	if reason != "provider_catalog_sync" {
+		t.Fatalf("transition reason = %q", reason)
+	}
+}
+
 func TestPostgresRepositoryDeleteSelectedCalendarClearsDestination(t *testing.T) {
 	pool := testPostgresPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -246,6 +395,14 @@ func TestPostgresRepositoryDeleteSelectedCalendarClearsDestination(t *testing.T)
 	} else if ok {
 		t.Fatal("destination calendar unexpectedly remained")
 	}
+}
+
+type mutableCatalogProvider struct {
+	snapshot calendarprovider.CatalogSnapshot
+}
+
+func (p *mutableCatalogProvider) ReadCatalog(context.Context, calendarprovider.CatalogInput) (calendarprovider.CatalogSnapshot, error) {
+	return p.snapshot, nil
 }
 
 func testPostgresPool(t *testing.T) *pgxpool.Pool {

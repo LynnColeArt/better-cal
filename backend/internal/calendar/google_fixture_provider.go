@@ -9,6 +9,9 @@ import (
 
 const (
 	googleFixtureProviderName         = "google-calendar-fixture"
+	googleFixtureConnectionRef        = "google-calendar-connection-fixture"
+	googleFixtureAccountRef           = "google-account-fixture"
+	googleFixtureAccountEmail         = "fixture-user@example.test"
 	googleFixtureHeaderProvider       = "X-Cal-Calendar-Provider"
 	googleFixtureOperationCancelEvent = "cancel_event"
 	googleFixtureOperationReschedule  = "move_event"
@@ -35,6 +38,50 @@ type GoogleFixtureDispatchEvent struct {
 	PreviousID             string `json:"previousId,omitempty"`
 	SelectedCalendarRef    string `json:"selectedCalendarRef,omitempty"`
 	DestinationCalendarRef string `json:"destinationCalendarRef,omitempty"`
+}
+
+func (GoogleFixtureProvider) ReadCatalog(_ context.Context, input CatalogInput) (CatalogSnapshot, error) {
+	if input.UserID != 123 {
+		return CatalogSnapshot{}, nil
+	}
+	return CatalogSnapshot{
+		Connections: []CatalogConnection{
+			{
+				ConnectionRef: googleFixtureConnectionRef,
+				Provider:      googleFixtureProviderName,
+				AccountRef:    googleFixtureAccountRef,
+				AccountEmail:  googleFixtureAccountEmail,
+				Status:        "active",
+			},
+		},
+		Calendars: []CatalogCalendar{
+			{
+				CalendarRef:   "destination-calendar-fixture",
+				ConnectionRef: googleFixtureConnectionRef,
+				Provider:      googleFixtureProviderName,
+				ExternalID:    "google-calendar-destination",
+				Name:          "Fixture Destination Calendar",
+				Primary:       true,
+				Writable:      true,
+			},
+			{
+				CalendarRef:   "selected-calendar-fixture",
+				ConnectionRef: googleFixtureConnectionRef,
+				Provider:      googleFixtureProviderName,
+				ExternalID:    "google-calendar-selected",
+				Name:          "Fixture Selected Calendar",
+				Writable:      true,
+			},
+			{
+				CalendarRef:   "team-calendar-fixture",
+				ConnectionRef: googleFixtureConnectionRef,
+				Provider:      googleFixtureProviderName,
+				ExternalID:    "google-calendar-team",
+				Name:          "Fixture Team Calendar",
+				Writable:      true,
+			},
+		},
+	}, nil
 }
 
 func (GoogleFixtureProvider) PrepareDispatch(_ context.Context, input DispatchInput) (PreparedDispatch, error) {

@@ -52,6 +52,30 @@ func TestGoogleFixtureProviderPreparesCancelDispatch(t *testing.T) {
 	}
 }
 
+func TestGoogleFixtureProviderReadsCatalog(t *testing.T) {
+	provider := NewGoogleFixtureProvider()
+
+	snapshot, err := provider.ReadCatalog(context.Background(), CatalogInput{UserID: 123})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Connections) != 1 {
+		t.Fatalf("connection count = %d", len(snapshot.Connections))
+	}
+	if snapshot.Connections[0].ConnectionRef != googleFixtureConnectionRef {
+		t.Fatalf("connection ref = %q", snapshot.Connections[0].ConnectionRef)
+	}
+	if snapshot.Connections[0].Status != "active" {
+		t.Fatalf("connection status = %q", snapshot.Connections[0].Status)
+	}
+	if len(snapshot.Calendars) != 3 {
+		t.Fatalf("calendar count = %d", len(snapshot.Calendars))
+	}
+	if snapshot.Calendars[2].CalendarRef != "team-calendar-fixture" {
+		t.Fatalf("team calendar ref = %q", snapshot.Calendars[2].CalendarRef)
+	}
+}
+
 func TestGoogleFixtureProviderPreparesRescheduleDispatch(t *testing.T) {
 	provider := NewGoogleFixtureProvider()
 

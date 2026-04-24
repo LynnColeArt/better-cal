@@ -10,6 +10,7 @@ import (
 
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
+	calendarprovider "github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/calendars"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
@@ -91,9 +92,16 @@ func main() {
 				booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(slotService)),
 			),
 		))
-		serverOptions = append(serverOptions, httpapi.WithCalendarStore(
-			calendars.NewStoreWithRepository(calendars.NewPostgresRepository(pool)),
-		))
+		calendarStore := calendars.NewStoreWithRepository(
+			calendars.NewPostgresRepository(pool),
+			calendars.WithCatalogProvider(calendarprovider.NewGoogleFixtureProvider()),
+		)
+		if err := calendarStore.SyncProviderCatalog(ctx, auth.FixtureAPIKeyPrincipal().ID); err != nil {
+			cancel()
+			slog.Error("calendar catalog provider sync failed", "error", err)
+			os.Exit(1)
+		}
+		serverOptions = append(serverOptions, httpapi.WithCalendarStore(calendarStore))
 		cancel()
 		slog.Info("database connection ready")
 	}

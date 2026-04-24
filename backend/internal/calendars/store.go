@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+
+	calendarprovider "github.com/LynnColeArt/better-cal/backend/internal/calendar"
 )
 
 const (
@@ -15,13 +17,16 @@ const (
 	FixtureSelectedCalendarRef    = "selected-calendar-fixture"
 	FixtureDestinationCalendarRef = "destination-calendar-fixture"
 	FixtureTeamCalendarRef        = "team-calendar-fixture"
+	catalogSyncTransitionReason   = "provider_catalog_sync"
 )
 
 var (
-	ErrInvalidSelectedCalendar       = errors.New("invalid selected calendar")
-	ErrInvalidSelectedCalendarRef    = errors.New("invalid selected calendar ref")
-	ErrInvalidDestinationCalendarRef = errors.New("invalid destination calendar ref")
-	ErrCalendarCatalogEntryNotFound  = errors.New("calendar catalog entry not found")
+	ErrInvalidSelectedCalendar        = errors.New("invalid selected calendar")
+	ErrInvalidSelectedCalendarRef     = errors.New("invalid selected calendar ref")
+	ErrInvalidDestinationCalendarRef  = errors.New("invalid destination calendar ref")
+	ErrCalendarCatalogEntryNotFound   = errors.New("calendar catalog entry not found")
+	ErrCalendarCatalogProviderUnset   = errors.New("calendar catalog provider is not configured")
+	ErrInvalidCalendarCatalogSnapshot = errors.New("invalid calendar catalog snapshot")
 )
 
 type CalendarConnection struct {
@@ -40,6 +45,14 @@ type CatalogCalendar struct {
 	Name          string `json:"name"`
 	Primary       bool   `json:"primary"`
 	Writable      bool   `json:"writable"`
+}
+
+type CalendarConnectionStatusTransition struct {
+	ConnectionRef  string
+	Provider       string
+	PreviousStatus string
+	NextStatus     string
+	Reason         string
 }
 
 type SelectedCalendar struct {
@@ -64,6 +77,7 @@ type DeleteSelectedCalendarResult struct {
 type Repository interface {
 	ReadCalendarConnections(ctx context.Context, userID int) ([]CalendarConnection, error)
 	SaveCalendarConnection(ctx context.Context, userID int, connection CalendarConnection) (CalendarConnection, error)
+	SyncCalendarCatalog(ctx context.Context, userID int, connections []CalendarConnection, catalog []CatalogCalendar, transitionReason string) ([]CalendarConnection, []CatalogCalendar, error)
 	ReadCatalogCalendars(ctx context.Context, userID int) ([]CatalogCalendar, error)
 	SaveCatalogCalendar(ctx context.Context, userID int, calendar CatalogCalendar) (CatalogCalendar, error)
 	ReadCatalogCalendar(ctx context.Context, userID int, calendarRef string) (CatalogCalendar, bool, error)
@@ -75,12 +89,13 @@ type Repository interface {
 }
 
 type Store struct {
-	mu          sync.Mutex
-	repo        Repository
-	connections map[int][]CalendarConnection
-	catalog     map[int][]CatalogCalendar
-	selected    map[int][]SelectedCalendar
-	destination map[int]string
+	mu              sync.Mutex
+	repo            Repository
+	catalogProvider calendarprovider.CatalogProviderAdapter
+	connections     map[int][]CalendarConnection
+	catalog         map[int][]CatalogCalendar
+	selected        map[int][]SelectedCalendar
+	destination     map[int]string
 }
 
 type StoreOption func(*Store)
@@ -88,6 +103,12 @@ type StoreOption func(*Store)
 func WithRepository(repo Repository) StoreOption {
 	return func(s *Store) {
 		s.repo = repo
+	}
+}
+
+func WithCatalogProvider(provider calendarprovider.CatalogProviderAdapter) StoreOption {
+	return func(s *Store) {
+		s.catalogProvider = provider
 	}
 }
 
@@ -126,6 +147,28 @@ func (s *Store) ReadCatalogCalendars(ctx context.Context, userID int) ([]Catalog
 		return nil, err
 	}
 	return append([]CatalogCalendar(nil), s.catalog[userID]...), nil
+}
+
+func (s *Store) SyncProviderCatalog(ctx context.Context, userID int) error {
+	if s.catalogProvider == nil {
+		return ErrCalendarCatalogProviderUnset
+	}
+	snapshot, err := s.catalogProvider.ReadCatalog(ctx, calendarprovider.CatalogInput{UserID: userID})
+	if err != nil {
+		return fmt.Errorf("read provider calendar catalog: %w", err)
+	}
+	connections, err := calendarConnectionsFromProvider(snapshot.Connections)
+	if err != nil {
+		return err
+	}
+	catalog, err := catalogCalendarsFromProvider(snapshot.Calendars)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.applyProviderCatalogLocked(ctx, userID, connections, catalog)
 }
 
 func (s *Store) ReadSelectedCalendars(ctx context.Context, userID int) ([]SelectedCalendar, error) {
@@ -282,8 +325,12 @@ func (s *Store) ensureLoadedLocked(ctx context.Context, userID int) error {
 		return nil
 	}
 	if s.repo == nil {
-		s.connections[userID] = fixtureCalendarConnections(userID)
-		s.catalog[userID] = fixtureCatalogCalendars(userID)
+		if _, ok := s.connections[userID]; !ok {
+			s.connections[userID] = fixtureCalendarConnections(userID)
+		}
+		if _, ok := s.catalog[userID]; !ok {
+			s.catalog[userID] = fixtureCatalogCalendars(userID)
+		}
 		s.selected[userID] = fixtureSelectedCalendars(userID)
 		if userID == fixtureUserID {
 			s.destination[userID] = FixtureDestinationCalendarRef
@@ -308,6 +355,30 @@ func (s *Store) ensureLoadedLocked(ctx context.Context, userID int) error {
 		return err
 	}
 
+	if (len(connections) == 0 || len(catalog) == 0) && s.catalogProvider != nil {
+		snapshot, err := s.catalogProvider.ReadCatalog(ctx, calendarprovider.CatalogInput{UserID: userID})
+		if err != nil {
+			return fmt.Errorf("read provider calendar catalog: %w", err)
+		}
+		providerConnections, err := calendarConnectionsFromProvider(snapshot.Connections)
+		if err != nil {
+			return err
+		}
+		providerCatalog, err := catalogCalendarsFromProvider(snapshot.Calendars)
+		if err != nil {
+			return err
+		}
+		if err := validateProviderCatalog(providerConnections, providerCatalog); err != nil {
+			return err
+		}
+		if len(providerConnections) > 0 || len(providerCatalog) > 0 {
+			if err := s.applyProviderCatalogLocked(ctx, userID, providerConnections, providerCatalog); err != nil {
+				return err
+			}
+			connections = append([]CalendarConnection(nil), s.connections[userID]...)
+			catalog = append([]CatalogCalendar(nil), s.catalog[userID]...)
+		}
+	}
 	if len(connections) == 0 && len(catalog) == 0 && userID == fixtureUserID {
 		for _, fixtureConnection := range fixtureCalendarConnections(userID) {
 			if _, err := s.repo.SaveCalendarConnection(ctx, userID, fixtureConnection); err != nil {
@@ -358,6 +429,27 @@ func (s *Store) ensureLoadedLocked(ctx context.Context, userID int) error {
 	return nil
 }
 
+func (s *Store) applyProviderCatalogLocked(ctx context.Context, userID int, connections []CalendarConnection, catalog []CatalogCalendar) error {
+	if err := validateProviderCatalog(connections, catalog); err != nil {
+		return err
+	}
+	if s.repo != nil {
+		var err error
+		connections, catalog, err = s.repo.SyncCalendarCatalog(ctx, userID, connections, catalog, catalogSyncTransitionReason)
+		if err != nil {
+			return err
+		}
+	}
+	persistedConnections := append([]CalendarConnection(nil), connections...)
+	persistedCatalog := append([]CatalogCalendar(nil), catalog...)
+	sortCalendarConnections(persistedConnections)
+	sortCatalogCalendars(persistedCatalog)
+	s.connections[userID] = persistedConnections
+	s.catalog[userID] = persistedCatalog
+	s.refreshSelectedForCatalogLocked(userID)
+	return nil
+}
+
 func (s *Store) catalogCalendarLocked(userID int, calendarRef string) (CatalogCalendar, bool) {
 	for _, calendar := range s.catalog[userID] {
 		if calendar.CalendarRef == calendarRef {
@@ -376,6 +468,30 @@ func toSelectedCalendar(calendar CatalogCalendar) SelectedCalendar {
 	}
 }
 
+func (s *Store) refreshSelectedForCatalogLocked(userID int) {
+	catalogByRef := map[string]CatalogCalendar{}
+	for _, calendar := range s.catalog[userID] {
+		catalogByRef[calendar.CalendarRef] = calendar
+	}
+
+	if selected, ok := s.selected[userID]; ok {
+		refreshed := selected[:0]
+		for _, calendar := range selected {
+			catalogCalendar, ok := catalogByRef[calendar.CalendarRef]
+			if !ok {
+				continue
+			}
+			refreshed = append(refreshed, toSelectedCalendar(catalogCalendar))
+		}
+		s.selected[userID] = append([]SelectedCalendar(nil), refreshed...)
+	}
+	if destinationRef := s.destination[userID]; destinationRef != "" {
+		if _, ok := catalogByRef[destinationRef]; !ok {
+			delete(s.destination, userID)
+		}
+	}
+}
+
 func sortSelectedCalendars(items []SelectedCalendar) {
 	slices.SortFunc(items, func(left SelectedCalendar, right SelectedCalendar) int {
 		switch {
@@ -387,6 +503,103 @@ func sortSelectedCalendars(items []SelectedCalendar) {
 			return 0
 		}
 	})
+}
+
+func sortCalendarConnections(items []CalendarConnection) {
+	slices.SortFunc(items, func(left CalendarConnection, right CalendarConnection) int {
+		switch {
+		case left.ConnectionRef < right.ConnectionRef:
+			return -1
+		case left.ConnectionRef > right.ConnectionRef:
+			return 1
+		default:
+			return 0
+		}
+	})
+}
+
+func sortCatalogCalendars(items []CatalogCalendar) {
+	slices.SortFunc(items, func(left CatalogCalendar, right CatalogCalendar) int {
+		switch {
+		case left.CalendarRef < right.CalendarRef:
+			return -1
+		case left.CalendarRef > right.CalendarRef:
+			return 1
+		default:
+			return 0
+		}
+	})
+}
+
+func calendarConnectionsFromProvider(items []calendarprovider.CatalogConnection) ([]CalendarConnection, error) {
+	connections := make([]CalendarConnection, 0, len(items))
+	for _, item := range items {
+		if item.ConnectionRef == "" || item.Provider == "" || item.AccountRef == "" || item.AccountEmail == "" || item.Status == "" {
+			return nil, ErrInvalidCalendarCatalogSnapshot
+		}
+		connections = append(connections, CalendarConnection{
+			ConnectionRef: item.ConnectionRef,
+			Provider:      item.Provider,
+			AccountRef:    item.AccountRef,
+			AccountEmail:  item.AccountEmail,
+			Status:        item.Status,
+		})
+	}
+	return connections, nil
+}
+
+func catalogCalendarsFromProvider(items []calendarprovider.CatalogCalendar) ([]CatalogCalendar, error) {
+	calendars := make([]CatalogCalendar, 0, len(items))
+	for _, item := range items {
+		if item.CalendarRef == "" || item.ConnectionRef == "" || item.Provider == "" || item.ExternalID == "" || item.Name == "" {
+			return nil, ErrInvalidCalendarCatalogSnapshot
+		}
+		calendars = append(calendars, CatalogCalendar{
+			CalendarRef:   item.CalendarRef,
+			ConnectionRef: item.ConnectionRef,
+			Provider:      item.Provider,
+			ExternalID:    item.ExternalID,
+			Name:          item.Name,
+			Primary:       item.Primary,
+			Writable:      item.Writable,
+		})
+	}
+	return calendars, nil
+}
+
+func validateProviderCatalog(connections []CalendarConnection, catalog []CatalogCalendar) error {
+	connectionRefs := map[string]string{}
+	for _, connection := range connections {
+		if connection.ConnectionRef == "" || connection.Provider == "" || connection.AccountRef == "" || connection.AccountEmail == "" || connection.Status == "" {
+			return ErrInvalidCalendarCatalogSnapshot
+		}
+		if _, ok := connectionRefs[connection.ConnectionRef]; ok {
+			return ErrInvalidCalendarCatalogSnapshot
+		}
+		connectionRefs[connection.ConnectionRef] = connection.Provider
+	}
+
+	calendarRefs := map[string]struct{}{}
+	externalRefs := map[string]struct{}{}
+	for _, calendar := range catalog {
+		if calendar.CalendarRef == "" || calendar.ConnectionRef == "" || calendar.Provider == "" || calendar.ExternalID == "" || calendar.Name == "" {
+			return ErrInvalidCalendarCatalogSnapshot
+		}
+		if _, ok := calendarRefs[calendar.CalendarRef]; ok {
+			return ErrInvalidCalendarCatalogSnapshot
+		}
+		calendarRefs[calendar.CalendarRef] = struct{}{}
+		connectionProvider, ok := connectionRefs[calendar.ConnectionRef]
+		if !ok || connectionProvider != calendar.Provider {
+			return ErrInvalidCalendarCatalogSnapshot
+		}
+		externalRef := calendar.Provider + "\x00" + calendar.ExternalID
+		if _, ok := externalRefs[externalRef]; ok {
+			return ErrInvalidCalendarCatalogSnapshot
+		}
+		externalRefs[externalRef] = struct{}{}
+	}
+	return nil
 }
 
 func fixtureCalendarConnections(userID int) []CalendarConnection {

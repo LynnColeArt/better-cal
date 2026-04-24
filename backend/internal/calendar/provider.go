@@ -28,3 +28,34 @@ type PreparedDispatch struct {
 type ProviderAdapter interface {
 	PrepareDispatch(context.Context, DispatchInput) (PreparedDispatch, error)
 }
+
+type CatalogInput struct {
+	UserID int
+}
+
+type CatalogSnapshot struct {
+	Connections []CatalogConnection
+	Calendars   []CatalogCalendar
+}
+
+type CatalogConnection struct {
+	ConnectionRef string
+	Provider      string
+	AccountRef    string
+	AccountEmail  string
+	Status        string
+}
+
+type CatalogCalendar struct {
+	CalendarRef   string
+	ConnectionRef string
+	Provider      string
+	ExternalID    string
+	Name          string
+	Primary       bool
+	Writable      bool
+}
+
+type CatalogProviderAdapter interface {
+	ReadCatalog(context.Context, CatalogInput) (CatalogSnapshot, error)
+}
