@@ -14,6 +14,7 @@ const (
 	PolicySlotsRead                 Policy = "policy.slots.read"
 	PolicyCalendarConnectionsRead   Policy = "policy.calendar-connections.read"
 	PolicyCalendarsRead             Policy = "policy.calendars.read"
+	PolicyCredentialsRead           Policy = "policy.credentials.read"
 	PolicySelectedCalendarsRead     Policy = "policy.selected-calendars.read"
 	PolicySelectedCalendarsWrite    Policy = "policy.selected-calendars.write"
 	PolicyDestinationCalendarsRead  Policy = "policy.destination-calendars.read"
@@ -46,6 +47,7 @@ func NewAuthorizer() *Authorizer {
 			PolicySlotsRead:                 {},
 			PolicyCalendarConnectionsRead:   {"calendar-connections:read"},
 			PolicyCalendarsRead:             {"calendars:read"},
+			PolicyCredentialsRead:           {"credentials:read"},
 			PolicySelectedCalendarsRead:     {"selected-calendars:read"},
 			PolicySelectedCalendarsWrite:    {"selected-calendars:write"},
 			PolicyDestinationCalendarsRead:  {"destination-calendars:read"},

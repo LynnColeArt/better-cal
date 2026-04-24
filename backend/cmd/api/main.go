@@ -13,6 +13,7 @@ import (
 	calendarprovider "github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/calendars"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
+	"github.com/LynnColeArt/better-cal/backend/internal/credentials"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/LynnColeArt/better-cal/backend/internal/httpapi"
 	"github.com/LynnColeArt/better-cal/backend/internal/slots"
@@ -68,6 +69,12 @@ func main() {
 			slog.Error("slot availability seed failed", "error", err)
 			os.Exit(1)
 		}
+		credentialRepository := credentials.NewPostgresRepository(pool)
+		if err := credentials.SeedFixtureMetadata(ctx, credentialRepository); err != nil {
+			cancel()
+			slog.Error("credential metadata seed failed", "error", err)
+			os.Exit(1)
+		}
 		webhookSubscriptionStore := booking.NewPostgresWebhookSubscriptionStore(pool)
 		if err := booking.SeedWebhookSubscriptions(ctx, webhookSubscriptionStore, booking.FixtureWebhookSubscriptions(cfg.WebhookSubscriberURL, cfg.WebhookSigningKeyRef)); err != nil {
 			cancel()
@@ -91,6 +98,9 @@ func main() {
 				booking.NewPostgresRepository(pool),
 				booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(slotService)),
 			),
+		))
+		serverOptions = append(serverOptions, httpapi.WithCredentialStore(
+			credentials.NewStoreWithRepository(credentialRepository),
 		))
 		calendarStore := calendars.NewStoreWithRepository(
 			calendars.NewPostgresRepository(pool),

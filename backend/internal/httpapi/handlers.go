@@ -108,6 +108,36 @@ func (s *Server) readCalendarCatalog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) readCredentialMetadata(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyCredentialsRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	credentials, err := s.credentials().ReadCredentialMetadata(r.Context(), principal.ID)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"items":     credentials,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
 func (s *Server) readSelectedCalendars(w http.ResponseWriter, r *http.Request) {
 	principal, ok, err := s.authenticateAPIKey(r)
 	if err != nil {

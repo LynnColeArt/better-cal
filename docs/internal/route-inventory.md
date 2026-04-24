@@ -95,6 +95,7 @@ API v2 is versioned and DTO-driven. The Go backend can expose these routes direc
 | Unified calendars | `/v2/calendars` | connections, events CRUD, freebusy, legacy event aliases | `../../../reference/apps/api/v2/src/modules/cal-unified-calendars/controllers/cal-unified-calendars.controller.ts` |
 | Selected calendars | `/v2/selected-calendars` | select and deselect calendars | `../../../reference/apps/api/v2/src/modules/selected-calendars/controllers/selected-calendars.controller.ts` |
 | Destination calendars | `/v2/destination-calendars` | set destination calendar | `../../../reference/apps/api/v2/src/modules/destination-calendars/controllers/destination-calendars.controller.ts` |
+| Credentials | `/v2/credentials` | credential metadata reads without secret payloads | `../../../reference/apps/api/v2/src/modules/credentials` |
 | Conferencing | `/v2/conferencing` | connect, OAuth auth URL, OAuth callback, list apps, set default, get default, disconnect | `../../../reference/apps/api/v2/src/modules/conferencing/controllers/conferencing.controller.ts` |
 | Google Calendar helper | `/v2/gcal` | OAuth auth URL, OAuth save, check connection | `../../../reference/apps/api/v2/src/platform/gcal/gcal.controller.ts` |
 | Webhooks | `/v2/webhooks` | create, update, get, list, delete | `../../../reference/apps/api/v2/src/modules/webhooks/controllers/webhooks.controller.ts` |

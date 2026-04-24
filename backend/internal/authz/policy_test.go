@@ -146,6 +146,13 @@ func TestPolicyConstantsExistInContractRegistry(t *testing.T) {
 		PolicyBookingWrite,
 		PolicyBookingHostAction,
 		PolicySlotsRead,
+		PolicyCalendarConnectionsRead,
+		PolicyCalendarsRead,
+		PolicyCredentialsRead,
+		PolicySelectedCalendarsRead,
+		PolicySelectedCalendarsWrite,
+		PolicyDestinationCalendarsRead,
+		PolicyDestinationCalendarsWrite,
 	} {
 		if !registered[string(policy)] {
 			t.Fatalf("policy %q is missing from contracts/registries/policies.json", policy)

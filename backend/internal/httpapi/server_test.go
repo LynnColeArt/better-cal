@@ -22,6 +22,7 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "cal_test_valid_mock", nil, http.StatusUnauthorized)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/calendar-connections", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodGet, "/v2/credentials", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/selected-calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/destination-calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/selected-calendars", "Bearer cal_test_valid_mock", map[string]any{
@@ -284,6 +285,38 @@ func TestCalendarManagementRoundTrip(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte(`"calendar":null`)) {
 		t.Fatalf("read destination body did not clear calendar: %s", body)
+	}
+}
+
+func TestCredentialMetadataDoesNotExposeSecrets(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/v2/credentials", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("authorization", "Bearer cal_test_valid_mock")
+
+	resp, body := do(t, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"credentialRef":"google-calendar-credential-fixture"`)) {
+		t.Fatalf("body did not contain fixture credential metadata: %s", body)
+	}
+	for _, forbidden := range [][]byte{
+		[]byte("secret"),
+		[]byte("token"),
+		[]byte("encrypted"),
+		[]byte("refresh"),
+		[]byte("providerPayload"),
+		[]byte("rawProvider"),
+	} {
+		if bytes.Contains(bytes.ToLower(body), bytes.ToLower(forbidden)) {
+			t.Fatalf("credential metadata response exposed forbidden term %q: %s", forbidden, body)
+		}
 	}
 }
 

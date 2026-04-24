@@ -145,6 +145,21 @@
       "fixtureRefs": []
     },
     {
+      "id": "api-v2.credentials.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/credentials",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.credentials.read",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
       "id": "api-v2.selected-calendars.get",
       "surface": "api-v2",
       "method": "GET",

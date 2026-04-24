@@ -231,6 +231,28 @@
       ]
     },
     {
+      "id": "policy.credentials.read",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "credentials:read"
+      ],
+      "resourceResolver": "current-principal-credential-metadata",
+      "negativeFixtures": [
+        "missing-credential",
+        "insufficient-permission",
+        "credential-secret-leak"
+      ]
+    },
+    {
       "id": "policy.selected-calendars.read",
       "status": "draft",
       "authModes": [

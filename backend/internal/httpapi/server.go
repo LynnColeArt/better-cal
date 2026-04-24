@@ -12,6 +12,7 @@ import (
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 	"github.com/LynnColeArt/better-cal/backend/internal/calendars"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
+	"github.com/LynnColeArt/better-cal/backend/internal/credentials"
 	"github.com/LynnColeArt/better-cal/backend/internal/logging"
 	"github.com/LynnColeArt/better-cal/backend/internal/slots"
 )
@@ -21,14 +22,15 @@ type contextKey string
 const requestIDKey contextKey = "request-id"
 
 type Server struct {
-	cfg           config.Config
-	authService   *auth.Service
-	authorizer    *authz.Authorizer
-	bookingStore  *booking.Store
-	calendarStore *calendars.Store
-	slotService   *slots.Service
-	logger        *slog.Logger
-	mux           *http.ServeMux
+	cfg             config.Config
+	authService     *auth.Service
+	authorizer      *authz.Authorizer
+	bookingStore    *booking.Store
+	calendarStore   *calendars.Store
+	credentialStore *credentials.Store
+	slotService     *slots.Service
+	logger          *slog.Logger
+	mux             *http.ServeMux
 }
 
 type Option func(*Server)
@@ -45,6 +47,14 @@ func WithCalendarStore(store *calendars.Store) Option {
 	return func(s *Server) {
 		if store != nil {
 			s.calendarStore = store
+		}
+	}
+}
+
+func WithCredentialStore(store *credentials.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.credentialStore = store
 		}
 	}
 }
@@ -90,6 +100,9 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger, opts ...Option)
 	}
 	if server.calendarStore == nil {
 		server.calendarStore = calendars.NewStore()
+	}
+	if server.credentialStore == nil {
+		server.credentialStore = credentials.NewStore()
 	}
 	if server.bookingStore == nil {
 		server.bookingStore = booking.NewStore(
@@ -142,6 +155,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v2/me", s.me)
 	s.mux.HandleFunc("GET /v2/calendar-connections", s.readCalendarConnections)
 	s.mux.HandleFunc("GET /v2/calendars", s.readCalendarCatalog)
+	s.mux.HandleFunc("GET /v2/credentials", s.readCredentialMetadata)
 	s.mux.HandleFunc("GET /v2/selected-calendars", s.readSelectedCalendars)
 	s.mux.HandleFunc("POST /v2/selected-calendars", s.saveSelectedCalendar)
 	s.mux.HandleFunc("DELETE /v2/selected-calendars/{calendarRef}", s.deleteSelectedCalendar)
@@ -220,6 +234,14 @@ func (s *Server) calendars() *calendars.Store {
 	}
 	s.calendarStore = calendars.NewStore()
 	return s.calendarStore
+}
+
+func (s *Server) credentials() *credentials.Store {
+	if s.credentialStore != nil {
+		return s.credentialStore
+	}
+	s.credentialStore = credentials.NewStore()
+	return s.credentialStore
 }
 
 func (s *Server) slots() *slots.Service {
