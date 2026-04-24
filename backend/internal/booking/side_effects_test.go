@@ -162,7 +162,7 @@ func TestSideEffectPlanningFailurePreventsStateTransition(t *testing.T) {
 	}
 }
 
-func TestFixtureSideEffectPortPersistsWebhookPayloadHints(t *testing.T) {
+func TestFixtureSideEffectPortPersistsSideEffectPayloadHints(t *testing.T) {
 	port := FixtureSideEffectPort{}
 
 	cancelled, err := port.PlanBookingCancelled(context.Background(), BookingCancelledSideEffect{
@@ -172,6 +172,7 @@ func TestFixtureSideEffectPortPersistsWebhookPayloadHints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertPayloadValue(t, cancelled[1].Payload, "cancellationReason", "Fixture cancellation")
 	assertPayloadValue(t, cancelled[2].Payload, "cancellationReason", "Fixture cancellation")
 
 	rescheduled, err := port.PlanBookingRescheduled(context.Background(), BookingRescheduledSideEffect{
@@ -183,6 +184,8 @@ func TestFixtureSideEffectPortPersistsWebhookPayloadHints(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPayloadValue(t, rescheduled[0].Payload, "rescheduleUid", PrimaryFixtureUID)
+	assertPayloadValue(t, rescheduled[1].Payload, "rescheduleUid", PrimaryFixtureUID)
+	assertPayloadValue(t, rescheduled[1].Payload, "reschedulingReason", "Fixture reschedule")
 	assertPayloadValue(t, rescheduled[2].Payload, "rescheduleUid", PrimaryFixtureUID)
 	assertPayloadValue(t, rescheduled[2].Payload, "reschedulingReason", "Fixture reschedule")
 
@@ -193,6 +196,7 @@ func TestFixtureSideEffectPortPersistsWebhookPayloadHints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertPayloadValue(t, declined[0].Payload, "reason", "Fixture decline")
 	assertPayloadValue(t, declined[1].Payload, "reason", "Fixture decline")
 }
 

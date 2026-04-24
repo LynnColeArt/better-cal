@@ -799,6 +799,228 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresSideEffectDispatcherRecordsEmailDispatchOnce(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	uid := fmt.Sprintf("repo-email-dispatch-%d", time.Now().UnixNano())
+	var requestCount atomic.Int32
+	var capturedBody atomic.Value
+	var capturedAction atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		bodyRaw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read error", http.StatusInternalServerError)
+			return
+		}
+		capturedBody.Store(string(bodyRaw))
+		capturedAction.Store(r.Header.Get("X-Cal-Email-Action"))
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	targetURL := server.URL + "/caldiy/email-dispatch"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+	})
+
+	bookingValue := repositoryTestBooking(uid, "email-dispatch-request")
+	bookingValue.Status = "cancelled"
+	bookingValue.UpdatedAt = "2026-01-01T00:07:00.000Z"
+	if err := repo.Save(ctx, []PlannedSideEffect{
+		{
+			Name:       SideEffectEmailCancelled,
+			BookingUID: uid,
+			RequestID:  "email-dispatch-request",
+			Payload: map[string]any{
+				"cancellationReason": "email fixture cancellation",
+			},
+		},
+	}, bookingValue); err != nil {
+		t.Fatal(err)
+	}
+
+	var sideEffectID int64
+	if err := pool.QueryRow(ctx, `
+		select id
+		from booking_planned_side_effects
+		where booking_uid = $1
+	`, uid).Scan(&sideEffectID); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := NewPostgresSideEffectDispatcher(
+		pool,
+		repo,
+		nil,
+		nil,
+		nil,
+		WithEmailTransport(NewHTTPEmailTransport(server.Client())),
+		WithEmailDispatchURL(targetURL),
+	)
+	record := PlannedSideEffectRecord{
+		ID:         sideEffectID,
+		Name:       SideEffectEmailCancelled,
+		BookingUID: uid,
+		RequestID:  "email-dispatch-request",
+		Payload: map[string]any{
+			"cancellationReason": "email fixture cancellation",
+		},
+	}
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if got := requestCount.Load(); got != 1 {
+		t.Fatalf("email requests = %d, want 1", got)
+	}
+
+	var dispatchRows int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from booking_side_effect_dispatch_log
+		where side_effect_id = $1
+			and booking_uid = $2
+			and name = $3
+			and request_id = $4
+	`, sideEffectID, uid, string(SideEffectEmailCancelled), "email-dispatch-request").Scan(&dispatchRows); err != nil {
+		t.Fatal(err)
+	}
+	if dispatchRows != 1 {
+		t.Fatalf("dispatch rows = %d, want 1", dispatchRows)
+	}
+
+	var action string
+	var contentType string
+	var createdAtWire string
+	var bodyRaw []byte
+	if err := pool.QueryRow(ctx, `
+		select action, content_type, created_at_wire, body
+		from booking_email_deliveries
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&action, &contentType, &createdAtWire, &bodyRaw); err != nil {
+		t.Fatal(err)
+	}
+	if action != string(EmailDeliveryBookingCancelled) {
+		t.Fatalf("action = %q", action)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content type = %q", contentType)
+	}
+	if createdAtWire != bookingValue.UpdatedAt {
+		t.Fatalf("created_at_wire = %q, want %q", createdAtWire, bookingValue.UpdatedAt)
+	}
+
+	var envelope EmailDeliveryEnvelope
+	if err := json.Unmarshal(bodyRaw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Action != EmailDeliveryBookingCancelled {
+		t.Fatalf("envelope action = %q", envelope.Action)
+	}
+	if envelope.Payload.UID != uid {
+		t.Fatalf("envelope payload uid = %q", envelope.Payload.UID)
+	}
+	if envelope.Payload.CancellationReason != "email fixture cancellation" {
+		t.Fatalf("envelope payload cancellation reason = %q", envelope.Payload.CancellationReason)
+	}
+	if len(envelope.Payload.Recipients) != 1 {
+		t.Fatalf("recipient count = %d, want 1", len(envelope.Payload.Recipients))
+	}
+	if envelope.Payload.Recipients[0].Email != "fixture-attendee@example.test" {
+		t.Fatalf("recipient email = %q", envelope.Payload.Recipients[0].Email)
+	}
+
+	var rawBody map[string]any
+	if err := json.Unmarshal(bodyRaw, &rawBody); err != nil {
+		t.Fatal(err)
+	}
+	payloadValue, _ := rawBody["payload"].(map[string]any)
+	if _, ok := payloadValue["responses"]; ok {
+		t.Fatal("email delivery exposed responses")
+	}
+	if _, ok := payloadValue["metadata"]; ok {
+		t.Fatal("email delivery exposed metadata")
+	}
+	recipientsValue, _ := payloadValue["recipients"].([]any)
+	if len(recipientsValue) == 0 {
+		t.Fatal("expected email recipients")
+	}
+	firstRecipient, _ := recipientsValue[0].(map[string]any)
+	if _, ok := firstRecipient["id"]; ok {
+		t.Fatal("email delivery exposed recipient id")
+	}
+
+	var attemptRows int
+	var attemptTargetURL string
+	var attemptAction string
+	var attemptContentType string
+	var attemptBody string
+	var attemptResponseStatus int
+	var attemptCount int
+	var delivered bool
+	var attemptLastError string
+	if err := pool.QueryRow(ctx, `
+		select count(*), min(target_url), min(action), min(content_type), min(body), min(coalesce(response_status, 0)), min(attempt_count), bool_and(delivered_at is not null), min(coalesce(last_error, ''))
+		from booking_email_delivery_attempts
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&attemptRows, &attemptTargetURL, &attemptAction, &attemptContentType, &attemptBody, &attemptResponseStatus, &attemptCount, &delivered, &attemptLastError); err != nil {
+		t.Fatal(err)
+	}
+	if attemptRows != 1 {
+		t.Fatalf("attempt rows = %d, want 1", attemptRows)
+	}
+	if attemptTargetURL != targetURL {
+		t.Fatalf("attempt target url = %q", attemptTargetURL)
+	}
+	if attemptAction != string(EmailDeliveryBookingCancelled) {
+		t.Fatalf("attempt action = %q", attemptAction)
+	}
+	if attemptContentType != "application/json" {
+		t.Fatalf("attempt content type = %q", attemptContentType)
+	}
+	if attemptResponseStatus != http.StatusAccepted {
+		t.Fatalf("attempt response status = %d", attemptResponseStatus)
+	}
+	if attemptCount != 1 {
+		t.Fatalf("attempt count = %d, want 1", attemptCount)
+	}
+	if !delivered {
+		t.Fatal("expected delivered email delivery attempt")
+	}
+	if attemptLastError != "" {
+		t.Fatalf("attempt last_error = %q", attemptLastError)
+	}
+
+	var attemptEnvelope EmailDeliveryEnvelope
+	if err := json.Unmarshal([]byte(attemptBody), &attemptEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if attemptEnvelope.Action != envelope.Action {
+		t.Fatalf("attempt action = %q", attemptEnvelope.Action)
+	}
+	if attemptEnvelope.Payload.UID != envelope.Payload.UID {
+		t.Fatalf("attempt payload uid = %q", attemptEnvelope.Payload.UID)
+	}
+	if attemptEnvelope.Payload.CancellationReason != envelope.Payload.CancellationReason {
+		t.Fatalf("attempt payload cancellation reason = %q", attemptEnvelope.Payload.CancellationReason)
+	}
+	if got, _ := capturedBody.Load().(string); got != attemptBody {
+		t.Fatalf("captured email body = %q", got)
+	}
+	if got, _ := capturedAction.Load().(string); got != string(EmailDeliveryBookingCancelled) {
+		t.Fatalf("captured email action = %q", got)
+	}
+}
+
 func TestPostgresSideEffectDispatcherRetriesFailedWebhookAttempt(t *testing.T) {
 	pool := testPostgresRepositoryPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

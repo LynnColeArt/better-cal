@@ -23,6 +23,8 @@ type PostgresSideEffectDispatcher struct {
 	subscriptions       WebhookSubscriptionStore
 	secretResolver      WebhookSigningSecretResolver
 	webhookTransport    WebhookAttemptTransport
+	emailTransport      EmailDeliveryTransport
+	emailDispatchURL    string
 	calendarTransport   CalendarDispatchTransport
 	calendarDispatchURL string
 	maxAttempts         int
@@ -43,6 +45,20 @@ func WithCalendarTransport(transport CalendarDispatchTransport) PostgresSideEffe
 		if transport != nil {
 			d.calendarTransport = transport
 		}
+	}
+}
+
+func WithEmailTransport(transport EmailDeliveryTransport) PostgresSideEffectDispatcherOption {
+	return func(d *PostgresSideEffectDispatcher) {
+		if transport != nil {
+			d.emailTransport = transport
+		}
+	}
+}
+
+func WithEmailDispatchURL(targetURL string) PostgresSideEffectDispatcherOption {
+	return func(d *PostgresSideEffectDispatcher) {
+		d.emailDispatchURL = targetURL
 	}
 }
 
@@ -76,6 +92,7 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 	}
 
 	pendingWebhookAttempts := []WebhookDeliveryAttempt{}
+	pendingEmailAttempts := []EmailDeliveryAttempt{}
 	pendingCalendarAttempts := []CalendarDispatchAttempt{}
 	if err := db.WithTx(ctx, d.pool, func(tx db.Tx) error {
 		if _, err := tx.Exec(ctx, `
@@ -88,6 +105,10 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 
 		var err error
 		pendingWebhookAttempts, err = d.prepareWebhookAttempts(ctx, tx, effect)
+		if err != nil {
+			return err
+		}
+		pendingEmailAttempts, err = d.prepareEmailAttempts(ctx, tx, effect)
 		if err != nil {
 			return err
 		}
@@ -117,6 +138,28 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 			}
 			if err := markWebhookAttemptDelivered(ctx, d.pool, attempt.ID, statusCode); err != nil {
 				return fmt.Errorf("mark webhook attempt delivered: %w", err)
+			}
+		}
+	}
+
+	if len(pendingEmailAttempts) > 0 {
+		if d.emailTransport == nil {
+			return errors.New("email delivery requires a transport")
+		}
+		for _, attempt := range pendingEmailAttempts {
+			receipt, err := d.emailTransport.DeliverEmailDelivery(ctx, attempt)
+			statusCode := emailDeliveryStatusCode(receipt, err)
+			if err != nil {
+				if markErr := markEmailDeliveryFailed(ctx, d.pool, attempt.ID, statusCode, err); markErr != nil {
+					return fmt.Errorf("mark email delivery failed: %w", markErr)
+				}
+				if dispatchErr == nil {
+					dispatchErr = err
+				}
+				continue
+			}
+			if err := markEmailDeliveryDelivered(ctx, d.pool, attempt.ID, statusCode); err != nil {
+				return fmt.Errorf("mark email delivery delivered: %w", err)
 			}
 		}
 	}

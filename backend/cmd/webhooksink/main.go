@@ -36,6 +36,7 @@ func main() {
 	})
 	mux.HandleFunc("/requests", sink.handleRequests)
 	mux.HandleFunc("/caldiy/webhook", sink.handleWebhook)
+	mux.HandleFunc("/caldiy/email-dispatch", sink.handleEmailDispatch)
 	mux.HandleFunc("/caldiy/calendar-dispatch", sink.handleCalendarDispatch)
 
 	server := &http.Server{
@@ -61,6 +62,15 @@ func (s *webhookSink) handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *webhookSink) handleCalendarDispatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.captureRequest(w, r)
+}
+
+func (s *webhookSink) handleEmailDispatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return

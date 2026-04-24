@@ -52,6 +52,8 @@ func main() {
 		}),
 		booking.NewHTTPWebhookTransport(nil),
 		booking.WithWebhookMaxAttempts(cfg.WebhookMaxAttempts),
+		booking.WithEmailTransport(booking.NewHTTPEmailTransport(nil)),
+		booking.WithEmailDispatchURL(cfg.EmailDispatchURL),
 		booking.WithCalendarTransport(booking.NewHTTPCalendarTransport(nil)),
 		booking.WithCalendarDispatchURL(cfg.CalendarDispatchURL),
 	)

@@ -65,7 +65,14 @@ type FixtureSideEffectPort struct{}
 func (FixtureSideEffectPort) PlanBookingCancelled(_ context.Context, event BookingCancelledSideEffect) ([]PlannedSideEffect, error) {
 	return []PlannedSideEffect{
 		{Name: SideEffectCalendarCancelled, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
-		{Name: SideEffectEmailCancelled, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{
+			Name:       SideEffectEmailCancelled,
+			BookingUID: event.Booking.UID,
+			RequestID:  event.Booking.RequestID,
+			Payload: map[string]any{
+				"cancellationReason": event.CancellationReason,
+			},
+		},
 		{
 			Name:       SideEffectWebhookBookingCancelled,
 			BookingUID: event.Booking.UID,
@@ -87,7 +94,15 @@ func (FixtureSideEffectPort) PlanBookingRescheduled(_ context.Context, event Boo
 				"rescheduleUid": event.OldBooking.UID,
 			},
 		},
-		{Name: SideEffectEmailRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
+		{
+			Name:       SideEffectEmailRescheduled,
+			BookingUID: event.NewBooking.UID,
+			RequestID:  event.NewBooking.RequestID,
+			Payload: map[string]any{
+				"rescheduleUid":      event.OldBooking.UID,
+				"reschedulingReason": event.ReschedulingReason,
+			},
+		},
 		{
 			Name:       SideEffectWebhookBookingRescheduled,
 			BookingUID: event.NewBooking.UID,
@@ -102,14 +117,21 @@ func (FixtureSideEffectPort) PlanBookingRescheduled(_ context.Context, event Boo
 
 func (FixtureSideEffectPort) PlanBookingConfirmed(_ context.Context, event BookingConfirmedSideEffect) ([]PlannedSideEffect, error) {
 	return []PlannedSideEffect{
-		{Name: SideEffectEmailConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{Name: SideEffectEmailConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID, Payload: map[string]any{}},
 		{Name: SideEffectWebhookBookingConfirmed, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID, Payload: map[string]any{}},
 	}, nil
 }
 
 func (FixtureSideEffectPort) PlanBookingDeclined(_ context.Context, event BookingDeclinedSideEffect) ([]PlannedSideEffect, error) {
 	return []PlannedSideEffect{
-		{Name: SideEffectEmailDeclined, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{
+			Name:       SideEffectEmailDeclined,
+			BookingUID: event.Booking.UID,
+			RequestID:  event.Booking.RequestID,
+			Payload: map[string]any{
+				"reason": event.Reason,
+			},
+		},
 		{
 			Name:       SideEffectWebhookBookingDeclined,
 			BookingUID: event.Booking.UID,
