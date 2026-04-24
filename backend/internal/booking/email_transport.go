@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	emailprovider "github.com/LynnColeArt/better-cal/backend/internal/email"
 )
 
 const defaultEmailTransportTimeout = 5 * time.Second
@@ -27,7 +29,7 @@ type EmailDeliveryReceipt struct {
 }
 
 type EmailDeliveryTransport interface {
-	DeliverEmailDelivery(context.Context, EmailDeliveryAttempt) (EmailDeliveryReceipt, error)
+	DeliverEmailDelivery(context.Context, emailprovider.PreparedDispatch) (EmailDeliveryReceipt, error)
 }
 
 type HTTPEmailTransport struct {
@@ -41,20 +43,25 @@ func NewHTTPEmailTransport(client *http.Client) HTTPEmailTransport {
 	return HTTPEmailTransport{client: client}
 }
 
-func (t HTTPEmailTransport) DeliverEmailDelivery(ctx context.Context, attempt EmailDeliveryAttempt) (EmailDeliveryReceipt, error) {
+func (t HTTPEmailTransport) DeliverEmailDelivery(ctx context.Context, dispatch emailprovider.PreparedDispatch) (EmailDeliveryReceipt, error) {
 	if t.client == nil {
 		return EmailDeliveryReceipt{}, EmailDeliveryError{}
 	}
-	if attempt.TargetURL == "" || attempt.Body == "" || attempt.ContentType == "" || attempt.Action == "" {
+	if dispatch.TargetURL == "" || dispatch.Body == "" || dispatch.ContentType == "" {
 		return EmailDeliveryReceipt{}, EmailDeliveryError{}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, attempt.TargetURL, strings.NewReader(attempt.Body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, dispatch.TargetURL, strings.NewReader(dispatch.Body))
 	if err != nil {
 		return EmailDeliveryReceipt{}, EmailDeliveryError{}
 	}
-	req.Header.Set("Content-Type", attempt.ContentType)
-	req.Header.Set("X-Cal-Email-Action", attempt.Action)
+	req.Header.Set("Content-Type", dispatch.ContentType)
+	for name, value := range dispatch.Headers {
+		if name == "" || value == "" {
+			continue
+		}
+		req.Header.Set(name, value)
+	}
 
 	resp, err := t.client.Do(req)
 	if err != nil {

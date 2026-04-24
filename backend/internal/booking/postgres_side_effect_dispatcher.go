@@ -8,6 +8,7 @@ import (
 
 	"github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
+	emailprovider "github.com/LynnColeArt/better-cal/backend/internal/email"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,6 +25,7 @@ type PostgresSideEffectDispatcher struct {
 	subscriptions       WebhookSubscriptionStore
 	secretResolver      WebhookSigningSecretResolver
 	webhookTransport    WebhookAttemptTransport
+	emailProvider       emailprovider.ProviderAdapter
 	emailTransport      EmailDeliveryTransport
 	emailDispatchURL    string
 	calendarProvider    calendar.ProviderAdapter
@@ -66,6 +68,14 @@ func WithEmailTransport(transport EmailDeliveryTransport) PostgresSideEffectDisp
 	}
 }
 
+func WithEmailProvider(provider emailprovider.ProviderAdapter) PostgresSideEffectDispatcherOption {
+	return func(d *PostgresSideEffectDispatcher) {
+		if provider != nil {
+			d.emailProvider = provider
+		}
+	}
+}
+
 func WithEmailDispatchURL(targetURL string) PostgresSideEffectDispatcherOption {
 	return func(d *PostgresSideEffectDispatcher) {
 		d.emailDispatchURL = targetURL
@@ -85,6 +95,7 @@ func NewPostgresSideEffectDispatcher(pool *pgxpool.Pool, bookings BookingReader,
 		subscriptions:    subscriptions,
 		secretResolver:   secretResolver,
 		webhookTransport: transport,
+		emailProvider:    emailprovider.NewResendFixtureProvider(),
 		calendarProvider: calendar.NewGoogleFixtureProvider(),
 		maxAttempts:      defaultWebhookMaxAttempts,
 	}
@@ -158,7 +169,11 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 			return errors.New("email delivery requires a transport")
 		}
 		for _, attempt := range pendingEmailAttempts {
-			receipt, err := d.emailTransport.DeliverEmailDelivery(ctx, attempt)
+			prepared, err := d.prepareEmailProviderDispatch(ctx, attempt)
+			if err != nil {
+				return err
+			}
+			receipt, err := d.emailTransport.DeliverEmailDelivery(ctx, prepared)
 			statusCode := emailDeliveryStatusCode(receipt, err)
 			if err != nil {
 				if markErr := markEmailDeliveryFailed(ctx, d.pool, attempt.ID, statusCode, err); markErr != nil {

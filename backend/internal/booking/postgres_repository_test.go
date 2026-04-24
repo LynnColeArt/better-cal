@@ -15,6 +15,7 @@ import (
 
 	"github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
+	emailprovider "github.com/LynnColeArt/better-cal/backend/internal/email"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -836,6 +837,7 @@ func TestPostgresSideEffectDispatcherRecordsEmailDispatchOnce(t *testing.T) {
 	var requestCount atomic.Int32
 	var capturedBody atomic.Value
 	var capturedAction atomic.Value
+	var capturedProvider atomic.Value
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
 		bodyRaw, err := io.ReadAll(r.Body)
@@ -845,6 +847,7 @@ func TestPostgresSideEffectDispatcherRecordsEmailDispatchOnce(t *testing.T) {
 		}
 		capturedBody.Store(string(bodyRaw))
 		capturedAction.Store(r.Header.Get("X-Cal-Email-Action"))
+		capturedProvider.Store(r.Header.Get("X-Cal-Email-Provider"))
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer server.Close()
@@ -888,6 +891,7 @@ func TestPostgresSideEffectDispatcherRecordsEmailDispatchOnce(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		WithEmailProvider(emailprovider.NewResendFixtureProvider()),
 		WithEmailTransport(NewHTTPEmailTransport(server.Client())),
 		WithEmailDispatchURL(targetURL),
 	)
@@ -1040,11 +1044,34 @@ func TestPostgresSideEffectDispatcherRecordsEmailDispatchOnce(t *testing.T) {
 	if attemptEnvelope.Payload.CancellationReason != envelope.Payload.CancellationReason {
 		t.Fatalf("attempt payload cancellation reason = %q", attemptEnvelope.Payload.CancellationReason)
 	}
-	if got, _ := capturedBody.Load().(string); got != attemptBody {
-		t.Fatalf("captured email body = %q", got)
+
+	var providerRequest emailprovider.ResendFixtureDispatchRequest
+	if err := json.Unmarshal([]byte(capturedBody.Load().(string)), &providerRequest); err != nil {
+		t.Fatal(err)
+	}
+	if providerRequest.Provider != "resend-email-fixture" {
+		t.Fatalf("provider request provider = %q", providerRequest.Provider)
+	}
+	if providerRequest.Template != "booking-cancelled" {
+		t.Fatalf("provider request template = %q", providerRequest.Template)
+	}
+	if len(providerRequest.Message.To) != 1 {
+		t.Fatalf("provider request recipient count = %d", len(providerRequest.Message.To))
+	}
+	if providerRequest.Message.To[0].Email != "fixture-attendee@example.test" {
+		t.Fatalf("provider request recipient email = %q", providerRequest.Message.To[0].Email)
+	}
+	if providerRequest.Message.Variables.UID != uid {
+		t.Fatalf("provider request uid = %q", providerRequest.Message.Variables.UID)
+	}
+	if providerRequest.Message.Variables.CancellationReason != "email fixture cancellation" {
+		t.Fatalf("provider request cancellation reason = %q", providerRequest.Message.Variables.CancellationReason)
 	}
 	if got, _ := capturedAction.Load().(string); got != string(EmailDeliveryBookingCancelled) {
 		t.Fatalf("captured email action = %q", got)
+	}
+	if got, _ := capturedProvider.Load().(string); got != "resend-email-fixture" {
+		t.Fatalf("captured email provider = %q", got)
 	}
 }
 

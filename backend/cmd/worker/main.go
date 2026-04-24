@@ -11,6 +11,7 @@ import (
 	"github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
+	emailprovider "github.com/LynnColeArt/better-cal/backend/internal/email"
 )
 
 func main() {
@@ -53,6 +54,7 @@ func main() {
 		}),
 		booking.NewHTTPWebhookTransport(nil),
 		booking.WithWebhookMaxAttempts(cfg.WebhookMaxAttempts),
+		booking.WithEmailProvider(emailprovider.NewResendFixtureProvider()),
 		booking.WithEmailTransport(booking.NewHTTPEmailTransport(nil)),
 		booking.WithEmailDispatchURL(cfg.EmailDispatchURL),
 		booking.WithCalendarProvider(calendar.NewGoogleFixtureProvider()),

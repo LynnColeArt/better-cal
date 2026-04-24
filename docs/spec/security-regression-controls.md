@@ -112,6 +112,7 @@ Booking:
 - booking side-effect dispatch failures remain retryable without storing raw provider error details;
 - booking dispatch logs contain only side-effect ids, names, booking ids, request ids, and timestamps;
 - booking queued email payload hints and email canary envelopes contain only contract fields needed for retry-safe delivery reconstruction and do not store attendee ids, responses, metadata, provider credentials, or raw provider responses;
+- booking typed email provider requests are derived from the generic email queue envelope at send time and do not widen the persisted data surface or store raw provider responses;
 - booking queued webhook payload hints contain only contract fields needed for retry-safe delivery reconstruction;
 - booking queued calendar payload hints and calendar dispatch envelopes contain only contract fields needed for retry-safe delivery reconstruction and do not store attendee ids, responses, metadata, provider credentials, or raw provider responses;
 - booking typed calendar provider requests are derived from the generic calendar queue envelope at send time and do not widen the persisted data surface or store raw provider responses;
