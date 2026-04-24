@@ -3,15 +3,19 @@ package calendar
 import "context"
 
 type DispatchInput struct {
-	Action        string
-	CreatedAt     string
-	UID           string
-	Status        string
-	Start         string
-	End           string
-	EventTypeID   int
-	RequestID     string
-	RescheduleUID string
+	Action                  string
+	CreatedAt               string
+	UID                     string
+	Status                  string
+	Start                   string
+	End                     string
+	EventTypeID             int
+	RequestID               string
+	SelectedCalendarRef     string
+	DestinationCalendarRef  string
+	ExternalEventID         string
+	RescheduleUID           string
+	PreviousExternalEventID string
 }
 
 type PreparedDispatch struct {

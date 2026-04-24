@@ -20,15 +20,19 @@ func (d PostgresSideEffectDispatcher) prepareCalendarProviderDispatch(ctx contex
 	}
 
 	prepared, err := d.calendarProvider.PrepareDispatch(ctx, calendar.DispatchInput{
-		Action:        string(envelope.Action),
-		CreatedAt:     envelope.CreatedAt,
-		UID:           envelope.Payload.UID,
-		Status:        envelope.Payload.Status,
-		Start:         envelope.Payload.Start,
-		End:           envelope.Payload.End,
-		EventTypeID:   envelope.Payload.EventTypeID,
-		RequestID:     envelope.Payload.RequestID,
-		RescheduleUID: envelope.Payload.RescheduleUID,
+		Action:                  string(envelope.Action),
+		CreatedAt:               envelope.CreatedAt,
+		UID:                     envelope.Payload.UID,
+		Status:                  envelope.Payload.Status,
+		Start:                   envelope.Payload.Start,
+		End:                     envelope.Payload.End,
+		EventTypeID:             envelope.Payload.EventTypeID,
+		RequestID:               envelope.Payload.RequestID,
+		SelectedCalendarRef:     envelope.Payload.SelectedCalendarRef,
+		DestinationCalendarRef:  envelope.Payload.DestinationCalendarRef,
+		ExternalEventID:         envelope.Payload.ExternalEventID,
+		RescheduleUID:           envelope.Payload.RescheduleUID,
+		PreviousExternalEventID: envelope.Payload.PreviousExternalEventID,
 	})
 	if err != nil {
 		return calendar.PreparedDispatch{}, fmt.Errorf("prepare calendar provider dispatch: %w", err)

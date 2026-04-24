@@ -10,10 +10,13 @@ func TestGoogleFixtureProviderPreparesCancelDispatch(t *testing.T) {
 	provider := NewGoogleFixtureProvider()
 
 	prepared, err := provider.PrepareDispatch(context.Background(), DispatchInput{
-		Action:    "BOOKING_CANCELLED",
-		CreatedAt: "2026-01-01T00:10:00.000Z",
-		UID:       "booking-uid",
-		RequestID: "request-id",
+		Action:                 "BOOKING_CANCELLED",
+		CreatedAt:              "2026-01-01T00:10:00.000Z",
+		UID:                    "booking-uid",
+		RequestID:              "request-id",
+		SelectedCalendarRef:    "selected-calendar-fixture",
+		DestinationCalendarRef: "destination-calendar-fixture",
+		ExternalEventID:        "external-event-id",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -35,8 +38,14 @@ func TestGoogleFixtureProviderPreparesCancelDispatch(t *testing.T) {
 	if request.Operation != googleFixtureOperationCancelEvent {
 		t.Fatalf("operation = %q", request.Operation)
 	}
-	if request.Event.ID != "booking-uid" {
+	if request.Event.ID != "external-event-id" {
 		t.Fatalf("event id = %q", request.Event.ID)
+	}
+	if request.Event.SelectedCalendarRef != "selected-calendar-fixture" {
+		t.Fatalf("selected calendar ref = %q", request.Event.SelectedCalendarRef)
+	}
+	if request.Event.DestinationCalendarRef != "destination-calendar-fixture" {
+		t.Fatalf("destination calendar ref = %q", request.Event.DestinationCalendarRef)
 	}
 	if request.Event.Start != "" || request.Event.End != "" || request.Event.PreviousID != "" {
 		t.Fatalf("unexpected event payload = %#v", request.Event)
@@ -47,13 +56,17 @@ func TestGoogleFixtureProviderPreparesRescheduleDispatch(t *testing.T) {
 	provider := NewGoogleFixtureProvider()
 
 	prepared, err := provider.PrepareDispatch(context.Background(), DispatchInput{
-		Action:        "BOOKING_RESCHEDULED",
-		CreatedAt:     "2026-01-01T00:11:00.000Z",
-		UID:           "booking-uid",
-		RequestID:     "request-id",
-		Start:         "2026-05-02T15:00:00.000Z",
-		End:           "2026-05-02T15:30:00.000Z",
-		RescheduleUID: "previous-booking-uid",
+		Action:                  "BOOKING_RESCHEDULED",
+		CreatedAt:               "2026-01-01T00:11:00.000Z",
+		UID:                     "booking-uid",
+		RequestID:               "request-id",
+		Start:                   "2026-05-02T15:00:00.000Z",
+		End:                     "2026-05-02T15:30:00.000Z",
+		SelectedCalendarRef:     "selected-calendar-fixture",
+		DestinationCalendarRef:  "destination-calendar-fixture",
+		ExternalEventID:         "external-event-id",
+		RescheduleUID:           "previous-booking-uid",
+		PreviousExternalEventID: "previous-external-event-id",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +79,7 @@ func TestGoogleFixtureProviderPreparesRescheduleDispatch(t *testing.T) {
 	if request.Operation != googleFixtureOperationReschedule {
 		t.Fatalf("operation = %q", request.Operation)
 	}
-	if request.Event.ID != "booking-uid" {
+	if request.Event.ID != "external-event-id" {
 		t.Fatalf("event id = %q", request.Event.ID)
 	}
 	if request.Event.Start != "2026-05-02T15:00:00.000Z" {
@@ -75,7 +88,13 @@ func TestGoogleFixtureProviderPreparesRescheduleDispatch(t *testing.T) {
 	if request.Event.End != "2026-05-02T15:30:00.000Z" {
 		t.Fatalf("event end = %q", request.Event.End)
 	}
-	if request.Event.PreviousID != "previous-booking-uid" {
+	if request.Event.PreviousID != "previous-external-event-id" {
 		t.Fatalf("event previous id = %q", request.Event.PreviousID)
+	}
+	if request.Event.SelectedCalendarRef != "selected-calendar-fixture" {
+		t.Fatalf("selected calendar ref = %q", request.Event.SelectedCalendarRef)
+	}
+	if request.Event.DestinationCalendarRef != "destination-calendar-fixture" {
+		t.Fatalf("destination calendar ref = %q", request.Event.DestinationCalendarRef)
 	}
 }

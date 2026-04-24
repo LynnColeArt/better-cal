@@ -166,24 +166,46 @@ func TestFixtureSideEffectPortPersistsSideEffectPayloadHints(t *testing.T) {
 	port := FixtureSideEffectPort{}
 
 	cancelled, err := port.PlanBookingCancelled(context.Background(), BookingCancelledSideEffect{
-		Booking:            BookingSideEffectSnapshot{UID: PrimaryFixtureUID, RequestID: "cancel-request"},
+		Booking: BookingSideEffectSnapshot{
+			UID:                     PrimaryFixtureUID,
+			RequestID:               "cancel-request",
+			SelectedCalendarRef:     FixtureSelectedCalendarRef,
+			DestinationCalendarRef:  FixtureDestinationCalendarRef,
+			ExternalCalendarEventID: "google-event-primary",
+		},
 		CancellationReason: "Fixture cancellation",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertPayloadValue(t, cancelled[0].Payload, "selectedCalendarRef", FixtureSelectedCalendarRef)
+	assertPayloadValue(t, cancelled[0].Payload, "destinationCalendarRef", FixtureDestinationCalendarRef)
+	assertPayloadValue(t, cancelled[0].Payload, "externalEventId", "google-event-primary")
 	assertPayloadValue(t, cancelled[1].Payload, "cancellationReason", "Fixture cancellation")
 	assertPayloadValue(t, cancelled[2].Payload, "cancellationReason", "Fixture cancellation")
 
 	rescheduled, err := port.PlanBookingRescheduled(context.Background(), BookingRescheduledSideEffect{
-		OldBooking:         BookingSideEffectSnapshot{UID: PrimaryFixtureUID},
-		NewBooking:         BookingSideEffectSnapshot{UID: RescheduledFixtureUID, RequestID: "reschedule-request"},
+		OldBooking: BookingSideEffectSnapshot{
+			UID:                     PrimaryFixtureUID,
+			ExternalCalendarEventID: "google-event-primary",
+		},
+		NewBooking: BookingSideEffectSnapshot{
+			UID:                     RescheduledFixtureUID,
+			RequestID:               "reschedule-request",
+			SelectedCalendarRef:     FixtureSelectedCalendarRef,
+			DestinationCalendarRef:  FixtureDestinationCalendarRef,
+			ExternalCalendarEventID: "google-event-rescheduled",
+		},
 		ReschedulingReason: "Fixture reschedule",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertPayloadValue(t, rescheduled[0].Payload, "rescheduleUid", PrimaryFixtureUID)
+	assertPayloadValue(t, rescheduled[0].Payload, "selectedCalendarRef", FixtureSelectedCalendarRef)
+	assertPayloadValue(t, rescheduled[0].Payload, "destinationCalendarRef", FixtureDestinationCalendarRef)
+	assertPayloadValue(t, rescheduled[0].Payload, "externalEventId", "google-event-rescheduled")
+	assertPayloadValue(t, rescheduled[0].Payload, "previousExternalEventId", "google-event-primary")
 	assertPayloadValue(t, rescheduled[1].Payload, "rescheduleUid", PrimaryFixtureUID)
 	assertPayloadValue(t, rescheduled[1].Payload, "reschedulingReason", "Fixture reschedule")
 	assertPayloadValue(t, rescheduled[2].Payload, "rescheduleUid", PrimaryFixtureUID)

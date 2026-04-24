@@ -116,6 +116,7 @@ Booking:
 - booking queued webhook payload hints contain only contract fields needed for retry-safe delivery reconstruction;
 - booking queued calendar payload hints and calendar dispatch envelopes contain only contract fields needed for retry-safe delivery reconstruction and do not store attendee ids, responses, metadata, provider credentials, or raw provider responses;
 - booking typed calendar provider requests are derived from the generic calendar queue envelope at send time and do not widen the persisted data surface or store raw provider responses;
+- booking selected/destination calendar refs and opaque external calendar event ids remain internal booking state and provider payload hints only; they are not exposed in public booking DTOs;
 - booking webhook subscriptions select only active subscribers for the matching trigger event;
 - booking webhook signing secrets never appear in subscription, delivery, or attempt tables and are resolved only through key refs at dispatch time;
 - booking email canary retry skips attempts already marked delivered and stores only response codes plus generic failure text;

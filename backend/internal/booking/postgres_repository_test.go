@@ -56,9 +56,12 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 		Metadata: map[string]any{
 			"fixture": "postgres-repository",
 		},
-		CreatedAt: "2026-01-01T00:00:00.000Z",
-		UpdatedAt: "2026-01-01T00:00:00.000Z",
-		RequestID: "repo-test-request",
+		CreatedAt:               "2026-01-01T00:00:00.000Z",
+		UpdatedAt:               "2026-01-01T00:00:00.000Z",
+		RequestID:               "repo-test-request",
+		SelectedCalendarRef:     "selected-calendar-repository",
+		DestinationCalendarRef:  "destination-calendar-repository",
+		ExternalCalendarEventID: "google-event-repository",
 	}
 
 	persisted, duplicate, err := repo.SaveCreated(ctx, bookingValue, idempotencyKey, nil)
@@ -103,6 +106,35 @@ func TestPostgresRepositoryPersistsBookingFixture(t *testing.T) {
 	}
 	if found.RequestID != "repo-test-request" {
 		t.Fatalf("request id = %q", found.RequestID)
+	}
+	if found.SelectedCalendarRef != "selected-calendar-repository" {
+		t.Fatalf("selected calendar ref = %q", found.SelectedCalendarRef)
+	}
+	if found.DestinationCalendarRef != "destination-calendar-repository" {
+		t.Fatalf("destination calendar ref = %q", found.DestinationCalendarRef)
+	}
+	if found.ExternalCalendarEventID != "google-event-repository" {
+		t.Fatalf("external calendar event id = %q", found.ExternalCalendarEventID)
+	}
+
+	var selectedCalendarRef string
+	var destinationCalendarRef string
+	var externalCalendarEventID string
+	if err := pool.QueryRow(ctx, `
+		select coalesce(selected_calendar_ref, ''), coalesce(destination_calendar_ref, ''), coalesce(external_calendar_event_id, '')
+		from bookings
+		where uid = $1
+	`, uid).Scan(&selectedCalendarRef, &destinationCalendarRef, &externalCalendarEventID); err != nil {
+		t.Fatal(err)
+	}
+	if selectedCalendarRef != "selected-calendar-repository" {
+		t.Fatalf("selected_calendar_ref = %q", selectedCalendarRef)
+	}
+	if destinationCalendarRef != "destination-calendar-repository" {
+		t.Fatalf("destination_calendar_ref = %q", destinationCalendarRef)
+	}
+	if externalCalendarEventID != "google-event-repository" {
+		t.Fatalf("external_calendar_event_id = %q", externalCalendarEventID)
 	}
 
 	replayed, ok, err := repo.ReadByIdempotencyKey(ctx, idempotencyKey)
@@ -621,7 +653,11 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
 	})
 
+	previousExternalEventID := "google-event-previous-calendar-dispatch"
 	bookingValue := repositoryTestBooking(uid, "calendar-dispatch-request")
+	bookingValue.SelectedCalendarRef = "selected-calendar-calendar-dispatch"
+	bookingValue.DestinationCalendarRef = "destination-calendar-calendar-dispatch"
+	bookingValue.ExternalCalendarEventID = "google-event-calendar-dispatch"
 	bookingValue.UpdatedAt = "2026-01-01T00:06:00.000Z"
 	if err := repo.Save(ctx, []PlannedSideEffect{
 		{
@@ -629,7 +665,11 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 			BookingUID: uid,
 			RequestID:  "calendar-dispatch-request",
 			Payload: map[string]any{
-				"rescheduleUid": rescheduleUID,
+				"rescheduleUid":           rescheduleUID,
+				"selectedCalendarRef":     bookingValue.SelectedCalendarRef,
+				"destinationCalendarRef":  bookingValue.DestinationCalendarRef,
+				"externalEventId":         bookingValue.ExternalCalendarEventID,
+				"previousExternalEventId": previousExternalEventID,
 			},
 		},
 	}, bookingValue); err != nil {
@@ -661,7 +701,11 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 		BookingUID: uid,
 		RequestID:  "calendar-dispatch-request",
 		Payload: map[string]any{
-			"rescheduleUid": rescheduleUID,
+			"rescheduleUid":           rescheduleUID,
+			"selectedCalendarRef":     bookingValue.SelectedCalendarRef,
+			"destinationCalendarRef":  bookingValue.DestinationCalendarRef,
+			"externalEventId":         bookingValue.ExternalCalendarEventID,
+			"previousExternalEventId": previousExternalEventID,
 		},
 	}
 	if err := dispatcher.Dispatch(ctx, record); err != nil {
@@ -722,6 +766,18 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 	}
 	if envelope.Payload.RescheduleUID != rescheduleUID {
 		t.Fatalf("envelope payload reschedule uid = %q", envelope.Payload.RescheduleUID)
+	}
+	if envelope.Payload.SelectedCalendarRef != bookingValue.SelectedCalendarRef {
+		t.Fatalf("envelope payload selected calendar ref = %q", envelope.Payload.SelectedCalendarRef)
+	}
+	if envelope.Payload.DestinationCalendarRef != bookingValue.DestinationCalendarRef {
+		t.Fatalf("envelope payload destination calendar ref = %q", envelope.Payload.DestinationCalendarRef)
+	}
+	if envelope.Payload.ExternalEventID != bookingValue.ExternalCalendarEventID {
+		t.Fatalf("envelope payload external event id = %q", envelope.Payload.ExternalEventID)
+	}
+	if envelope.Payload.PreviousExternalEventID != previousExternalEventID {
+		t.Fatalf("envelope payload previous external event id = %q", envelope.Payload.PreviousExternalEventID)
 	}
 	if envelope.Payload.RequestID != "calendar-dispatch-request" {
 		t.Fatalf("envelope payload request id = %q", envelope.Payload.RequestID)
@@ -796,6 +852,12 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 	if attemptEnvelope.Payload.RescheduleUID != envelope.Payload.RescheduleUID {
 		t.Fatalf("attempt payload reschedule uid = %q", attemptEnvelope.Payload.RescheduleUID)
 	}
+	if attemptEnvelope.Payload.ExternalEventID != envelope.Payload.ExternalEventID {
+		t.Fatalf("attempt payload external event id = %q", attemptEnvelope.Payload.ExternalEventID)
+	}
+	if attemptEnvelope.Payload.PreviousExternalEventID != envelope.Payload.PreviousExternalEventID {
+		t.Fatalf("attempt payload previous external event id = %q", attemptEnvelope.Payload.PreviousExternalEventID)
+	}
 
 	var providerRequest calendar.GoogleFixtureDispatchRequest
 	if err := json.Unmarshal([]byte(capturedBody.Load().(string)), &providerRequest); err != nil {
@@ -807,7 +869,7 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 	if providerRequest.Operation != "move_event" {
 		t.Fatalf("provider request operation = %q", providerRequest.Operation)
 	}
-	if providerRequest.Event.ID != uid {
+	if providerRequest.Event.ID != bookingValue.ExternalCalendarEventID {
 		t.Fatalf("provider request event id = %q", providerRequest.Event.ID)
 	}
 	if providerRequest.Event.Start != bookingValue.Start {
@@ -816,8 +878,14 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 	if providerRequest.Event.End != bookingValue.End {
 		t.Fatalf("provider request event end = %q", providerRequest.Event.End)
 	}
-	if providerRequest.Event.PreviousID != rescheduleUID {
+	if providerRequest.Event.PreviousID != previousExternalEventID {
 		t.Fatalf("provider request previous id = %q", providerRequest.Event.PreviousID)
+	}
+	if providerRequest.Event.SelectedCalendarRef != bookingValue.SelectedCalendarRef {
+		t.Fatalf("provider request selected calendar ref = %q", providerRequest.Event.SelectedCalendarRef)
+	}
+	if providerRequest.Event.DestinationCalendarRef != bookingValue.DestinationCalendarRef {
+		t.Fatalf("provider request destination calendar ref = %q", providerRequest.Event.DestinationCalendarRef)
 	}
 	if got, _ := capturedAction.Load().(string); got != string(CalendarDispatchBookingRescheduled) {
 		t.Fatalf("captured calendar action = %q", got)
@@ -1525,9 +1593,12 @@ func repositoryTestBooking(uid string, requestID string) Booking {
 		Metadata: map[string]any{
 			"fixture": "postgres-repository",
 		},
-		CreatedAt: "2026-01-01T00:00:00.000Z",
-		UpdatedAt: "2026-01-01T00:00:00.000Z",
-		RequestID: requestID,
+		CreatedAt:               "2026-01-01T00:00:00.000Z",
+		UpdatedAt:               "2026-01-01T00:00:00.000Z",
+		RequestID:               requestID,
+		SelectedCalendarRef:     FixtureSelectedCalendarRef,
+		DestinationCalendarRef:  FixtureDestinationCalendarRef,
+		ExternalCalendarEventID: fixtureExternalCalendarEventID(uid),
 	}
 }
 

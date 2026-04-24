@@ -9,15 +9,17 @@ import (
 )
 
 const (
-	PrimaryFixtureUID        = "mock-booking-personal-basic"
-	RescheduledFixtureUID    = "mock-booking-rescheduled"
-	PendingConfirmFixtureUID = "mock-booking-pending-confirm"
-	PendingDeclineFixtureUID = "mock-booking-pending-decline"
-	FixtureOwnerUserID       = 123
-	FixtureEventTypeID       = slots.FixtureEventTypeID
-	FixtureBookingStart      = slots.FixtureSlotTime
-	FixtureBookingEnd        = "2026-05-01T15:30:00.000Z"
-	FixtureTimeZone          = slots.FixtureTimeZone
+	PrimaryFixtureUID             = "mock-booking-personal-basic"
+	RescheduledFixtureUID         = "mock-booking-rescheduled"
+	PendingConfirmFixtureUID      = "mock-booking-pending-confirm"
+	PendingDeclineFixtureUID      = "mock-booking-pending-decline"
+	FixtureOwnerUserID            = 123
+	FixtureEventTypeID            = slots.FixtureEventTypeID
+	FixtureBookingStart           = slots.FixtureSlotTime
+	FixtureBookingEnd             = "2026-05-01T15:30:00.000Z"
+	FixtureTimeZone               = slots.FixtureTimeZone
+	FixtureSelectedCalendarRef    = "selected-calendar-fixture"
+	FixtureDestinationCalendarRef = "destination-calendar-fixture"
 )
 
 type Attendee struct {
@@ -28,21 +30,24 @@ type Attendee struct {
 }
 
 type Booking struct {
-	UID         string         `json:"uid"`
-	ID          int            `json:"id"`
-	Title       string         `json:"title"`
-	Status      string         `json:"status"`
-	Start       string         `json:"start"`
-	End         string         `json:"end"`
-	EventTypeID int            `json:"eventTypeId"`
-	Attendees   []Attendee     `json:"attendees"`
-	Responses   map[string]any `json:"responses"`
-	Metadata    map[string]any `json:"metadata"`
-	CreatedAt   string         `json:"createdAt"`
-	UpdatedAt   string         `json:"updatedAt"`
-	RequestID   string         `json:"requestId"`
-	OwnerUserID int            `json:"-"`
-	HostUserIDs []int          `json:"-"`
+	UID                     string         `json:"uid"`
+	ID                      int            `json:"id"`
+	Title                   string         `json:"title"`
+	Status                  string         `json:"status"`
+	Start                   string         `json:"start"`
+	End                     string         `json:"end"`
+	EventTypeID             int            `json:"eventTypeId"`
+	Attendees               []Attendee     `json:"attendees"`
+	Responses               map[string]any `json:"responses"`
+	Metadata                map[string]any `json:"metadata"`
+	CreatedAt               string         `json:"createdAt"`
+	UpdatedAt               string         `json:"updatedAt"`
+	RequestID               string         `json:"requestId"`
+	SelectedCalendarRef     string         `json:"-"`
+	DestinationCalendarRef  string         `json:"-"`
+	ExternalCalendarEventID string         `json:"-"`
+	OwnerUserID             int            `json:"-"`
+	HostUserIDs             []int          `json:"-"`
 }
 
 type CreateRequest struct {
@@ -336,11 +341,12 @@ func (s *Store) Reschedule(ctx context.Context, requestID string, oldUID string,
 		return RescheduleResult{}, false, err
 	}
 	newBooking := fixtureBooking(requestID, mergeBooking(existing, Booking{
-		UID:       RescheduledFixtureUID,
-		Status:    "accepted",
-		Start:     start,
-		End:       end,
-		UpdatedAt: "2026-01-01T00:10:00.000Z",
+		UID:                     RescheduledFixtureUID,
+		Status:                  "accepted",
+		Start:                   start,
+		End:                     end,
+		UpdatedAt:               "2026-01-01T00:10:00.000Z",
+		ExternalCalendarEventID: fixtureExternalCalendarEventID(RescheduledFixtureUID),
 	}))
 	plannedSideEffects, err := s.sideEffectPort().PlanBookingRescheduled(ctx, BookingRescheduledSideEffect{
 		OldBooking:         sideEffectSnapshot(oldBooking),
@@ -473,13 +479,25 @@ func fixtureBooking(requestID string, overrides Booking) Booking {
 		Metadata: map[string]any{
 			"fixture": "personal-basic",
 		},
-		CreatedAt:   "2026-01-01T00:00:00.000Z",
-		UpdatedAt:   "2026-01-01T00:00:00.000Z",
-		RequestID:   requestID,
-		OwnerUserID: FixtureOwnerUserID,
-		HostUserIDs: []int{FixtureOwnerUserID},
+		CreatedAt:              "2026-01-01T00:00:00.000Z",
+		UpdatedAt:              "2026-01-01T00:00:00.000Z",
+		RequestID:              requestID,
+		SelectedCalendarRef:    FixtureSelectedCalendarRef,
+		DestinationCalendarRef: FixtureDestinationCalendarRef,
+		OwnerUserID:            FixtureOwnerUserID,
+		HostUserIDs:            []int{FixtureOwnerUserID},
 	}
-	return mergeBooking(base, overrides)
+	merged := mergeBooking(base, overrides)
+	if merged.SelectedCalendarRef == "" {
+		merged.SelectedCalendarRef = FixtureSelectedCalendarRef
+	}
+	if merged.DestinationCalendarRef == "" {
+		merged.DestinationCalendarRef = FixtureDestinationCalendarRef
+	}
+	if merged.ExternalCalendarEventID == "" {
+		merged.ExternalCalendarEventID = fixtureExternalCalendarEventID(merged.UID)
+	}
+	return merged
 }
 
 func pendingFixtureBooking(requestID string, uid string) Booking {
@@ -563,6 +581,15 @@ func mergeBooking(base Booking, overrides Booking) Booking {
 	if overrides.RequestID != "" {
 		base.RequestID = overrides.RequestID
 	}
+	if overrides.SelectedCalendarRef != "" {
+		base.SelectedCalendarRef = overrides.SelectedCalendarRef
+	}
+	if overrides.DestinationCalendarRef != "" {
+		base.DestinationCalendarRef = overrides.DestinationCalendarRef
+	}
+	if overrides.ExternalCalendarEventID != "" {
+		base.ExternalCalendarEventID = overrides.ExternalCalendarEventID
+	}
 	if overrides.OwnerUserID != 0 {
 		base.OwnerUserID = overrides.OwnerUserID
 	}
@@ -570,6 +597,13 @@ func mergeBooking(base Booking, overrides Booking) Booking {
 		base.HostUserIDs = overrides.HostUserIDs
 	}
 	return base
+}
+
+func fixtureExternalCalendarEventID(uid string) string {
+	if uid == "" {
+		return ""
+	}
+	return "google-event-" + uid
 }
 
 func (s *Store) findLocked(ctx context.Context, requestID string, uid string) (Booking, bool, error) {

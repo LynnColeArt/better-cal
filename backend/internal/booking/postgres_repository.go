@@ -58,7 +58,21 @@ func (r *PostgresRepository) readStructuredBooking(ctx context.Context, uid stri
 	var responsesRaw []byte
 	var metadataRaw []byte
 	err := r.pool.QueryRow(ctx, `
-		select uid, booking_id, title, status, start_time, end_time, event_type_id, responses, metadata, created_at_wire, updated_at_wire, request_id
+		select uid,
+			booking_id,
+			title,
+			status,
+			start_time,
+			end_time,
+			event_type_id,
+			responses,
+			metadata,
+			created_at_wire,
+			updated_at_wire,
+			request_id,
+			coalesce(selected_calendar_ref, ''),
+			coalesce(destination_calendar_ref, ''),
+			coalesce(external_calendar_event_id, '')
 		from bookings
 		where uid = $1
 	`, uid).Scan(
@@ -74,6 +88,9 @@ func (r *PostgresRepository) readStructuredBooking(ctx context.Context, uid stri
 		&bookingValue.CreatedAt,
 		&bookingValue.UpdatedAt,
 		&bookingValue.RequestID,
+		&bookingValue.SelectedCalendarRef,
+		&bookingValue.DestinationCalendarRef,
+		&bookingValue.ExternalCalendarEventID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Booking{}, false, nil
@@ -325,9 +342,12 @@ func saveStructuredBooking(ctx context.Context, tx db.Tx, booking Booking) error
 			metadata,
 			created_at_wire,
 			updated_at_wire,
-			request_id
+			request_id,
+			selected_calendar_ref,
+			destination_calendar_ref,
+			external_calendar_event_id
 		)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		on conflict (uid) do update set
 			booking_id = excluded.booking_id,
 			title = excluded.title,
@@ -340,8 +360,11 @@ func saveStructuredBooking(ctx context.Context, tx db.Tx, booking Booking) error
 			created_at_wire = excluded.created_at_wire,
 			updated_at_wire = excluded.updated_at_wire,
 			request_id = excluded.request_id,
+			selected_calendar_ref = excluded.selected_calendar_ref,
+			destination_calendar_ref = excluded.destination_calendar_ref,
+			external_calendar_event_id = excluded.external_calendar_event_id,
 			updated_at = now()
-	`, booking.UID, booking.ID, booking.Title, booking.Status, booking.Start, booking.End, booking.EventTypeID, string(responsesRaw), string(metadataRaw), booking.CreatedAt, booking.UpdatedAt, booking.RequestID); err != nil {
+	`, booking.UID, booking.ID, booking.Title, booking.Status, booking.Start, booking.End, booking.EventTypeID, string(responsesRaw), string(metadataRaw), booking.CreatedAt, booking.UpdatedAt, booking.RequestID, booking.SelectedCalendarRef, booking.DestinationCalendarRef, booking.ExternalCalendarEventID); err != nil {
 		return fmt.Errorf("save booking row: %w", err)
 	}
 

@@ -52,19 +52,27 @@ type BookingDeclinedSideEffect struct {
 }
 
 type BookingSideEffectSnapshot struct {
-	UID         string
-	Status      string
-	Start       string
-	End         string
-	EventTypeID int
-	RequestID   string
+	UID                     string
+	Status                  string
+	Start                   string
+	End                     string
+	EventTypeID             int
+	RequestID               string
+	SelectedCalendarRef     string
+	DestinationCalendarRef  string
+	ExternalCalendarEventID string
 }
 
 type FixtureSideEffectPort struct{}
 
 func (FixtureSideEffectPort) PlanBookingCancelled(_ context.Context, event BookingCancelledSideEffect) ([]PlannedSideEffect, error) {
 	return []PlannedSideEffect{
-		{Name: SideEffectCalendarCancelled, BookingUID: event.Booking.UID, RequestID: event.Booking.RequestID},
+		{
+			Name:       SideEffectCalendarCancelled,
+			BookingUID: event.Booking.UID,
+			RequestID:  event.Booking.RequestID,
+			Payload:    calendarPayloadHints(event.Booking),
+		},
 		{
 			Name:       SideEffectEmailCancelled,
 			BookingUID: event.Booking.UID,
@@ -85,14 +93,18 @@ func (FixtureSideEffectPort) PlanBookingCancelled(_ context.Context, event Booki
 }
 
 func (FixtureSideEffectPort) PlanBookingRescheduled(_ context.Context, event BookingRescheduledSideEffect) ([]PlannedSideEffect, error) {
+	calendarPayload := calendarPayloadHints(event.NewBooking)
+	calendarPayload["rescheduleUid"] = event.OldBooking.UID
+	if event.OldBooking.ExternalCalendarEventID != "" {
+		calendarPayload["previousExternalEventId"] = event.OldBooking.ExternalCalendarEventID
+	}
+
 	return []PlannedSideEffect{
 		{
 			Name:       SideEffectCalendarRescheduled,
 			BookingUID: event.NewBooking.UID,
 			RequestID:  event.NewBooking.RequestID,
-			Payload: map[string]any{
-				"rescheduleUid": event.OldBooking.UID,
-			},
+			Payload:    calendarPayload,
 		},
 		{
 			Name:       SideEffectEmailRescheduled,
@@ -145,12 +157,15 @@ func (FixtureSideEffectPort) PlanBookingDeclined(_ context.Context, event Bookin
 
 func sideEffectSnapshot(booking Booking) BookingSideEffectSnapshot {
 	return BookingSideEffectSnapshot{
-		UID:         booking.UID,
-		Status:      booking.Status,
-		Start:       booking.Start,
-		End:         booking.End,
-		EventTypeID: booking.EventTypeID,
-		RequestID:   booking.RequestID,
+		UID:                     booking.UID,
+		Status:                  booking.Status,
+		Start:                   booking.Start,
+		End:                     booking.End,
+		EventTypeID:             booking.EventTypeID,
+		RequestID:               booking.RequestID,
+		SelectedCalendarRef:     booking.SelectedCalendarRef,
+		DestinationCalendarRef:  booking.DestinationCalendarRef,
+		ExternalCalendarEventID: booking.ExternalCalendarEventID,
 	}
 }
 
@@ -160,4 +175,18 @@ func sideEffectNames(effects []PlannedSideEffect) []string {
 		names = append(names, string(effect.Name))
 	}
 	return names
+}
+
+func calendarPayloadHints(snapshot BookingSideEffectSnapshot) map[string]any {
+	payload := map[string]any{}
+	if snapshot.SelectedCalendarRef != "" {
+		payload["selectedCalendarRef"] = snapshot.SelectedCalendarRef
+	}
+	if snapshot.DestinationCalendarRef != "" {
+		payload["destinationCalendarRef"] = snapshot.DestinationCalendarRef
+	}
+	if snapshot.ExternalCalendarEventID != "" {
+		payload["externalEventId"] = snapshot.ExternalCalendarEventID
+	}
+	return payload
 }

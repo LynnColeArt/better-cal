@@ -29,10 +29,12 @@ type GoogleFixtureDispatchRequest struct {
 }
 
 type GoogleFixtureDispatchEvent struct {
-	ID         string `json:"id"`
-	Start      string `json:"start,omitempty"`
-	End        string `json:"end,omitempty"`
-	PreviousID string `json:"previousId,omitempty"`
+	ID                     string `json:"id"`
+	Start                  string `json:"start,omitempty"`
+	End                    string `json:"end,omitempty"`
+	PreviousID             string `json:"previousId,omitempty"`
+	SelectedCalendarRef    string `json:"selectedCalendarRef,omitempty"`
+	DestinationCalendarRef string `json:"destinationCalendarRef,omitempty"`
 }
 
 func (GoogleFixtureProvider) PrepareDispatch(_ context.Context, input DispatchInput) (PreparedDispatch, error) {
@@ -59,30 +61,46 @@ func googleFixtureDispatchRequest(input DispatchInput) (GoogleFixtureDispatchReq
 		RequestedAt: input.CreatedAt,
 		RequestID:   input.RequestID,
 	}
+	eventID := googleFixtureEventID(input)
+	event := GoogleFixtureDispatchEvent{
+		ID:                     eventID,
+		SelectedCalendarRef:    input.SelectedCalendarRef,
+		DestinationCalendarRef: input.DestinationCalendarRef,
+	}
 
 	switch input.Action {
 	case "BOOKING_CANCELLED":
-		if input.UID == "" || input.RequestID == "" {
-			return GoogleFixtureDispatchRequest{}, errors.New("calendar provider dispatch requires booking uid and request id")
+		if eventID == "" || input.RequestID == "" {
+			return GoogleFixtureDispatchRequest{}, errors.New("calendar provider dispatch requires an event id and request id")
 		}
 		request.Operation = googleFixtureOperationCancelEvent
-		request.Event = GoogleFixtureDispatchEvent{
-			ID: input.UID,
-		}
+		request.Event = event
 	case "BOOKING_RESCHEDULED":
-		if input.UID == "" || input.RequestID == "" || input.Start == "" || input.End == "" {
-			return GoogleFixtureDispatchRequest{}, errors.New("calendar provider reschedule dispatch requires booking uid, request id, start, and end")
+		if eventID == "" || input.RequestID == "" || input.Start == "" || input.End == "" {
+			return GoogleFixtureDispatchRequest{}, errors.New("calendar provider reschedule dispatch requires an event id, request id, start, and end")
 		}
 		request.Operation = googleFixtureOperationReschedule
-		request.Event = GoogleFixtureDispatchEvent{
-			ID:         input.UID,
-			Start:      input.Start,
-			End:        input.End,
-			PreviousID: input.RescheduleUID,
-		}
+		event.Start = input.Start
+		event.End = input.End
+		event.PreviousID = googleFixturePreviousEventID(input)
+		request.Event = event
 	default:
 		return GoogleFixtureDispatchRequest{}, fmt.Errorf("calendar provider action %q is unsupported", input.Action)
 	}
 
 	return request, nil
+}
+
+func googleFixtureEventID(input DispatchInput) string {
+	if input.ExternalEventID != "" {
+		return input.ExternalEventID
+	}
+	return input.UID
+}
+
+func googleFixturePreviousEventID(input DispatchInput) string {
+	if input.PreviousExternalEventID != "" {
+		return input.PreviousExternalEventID
+	}
+	return input.RescheduleUID
 }
