@@ -115,6 +115,36 @@
       ]
     },
     {
+      "id": "api-v2.calendar-connections.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/calendar-connections",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.calendar-connections.read",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
+      "id": "api-v2.calendars.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/calendars",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.calendars.read",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
       "id": "api-v2.selected-calendars.get",
       "surface": "api-v2",
       "method": "GET",

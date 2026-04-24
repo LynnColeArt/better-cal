@@ -48,6 +48,66 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) readCalendarConnections(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyCalendarConnectionsRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	connections, err := s.calendars().ReadCalendarConnections(r.Context(), principal.ID)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"items":     connections,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
+func (s *Server) readCalendarCatalog(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyCalendarsRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	catalog, err := s.calendars().ReadCatalogCalendars(r.Context(), principal.ID)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"items":     catalog,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
 func (s *Server) readSelectedCalendars(w http.ResponseWriter, r *http.Request) {
 	principal, ok, err := s.authenticateAPIKey(r)
 	if err != nil {
@@ -103,6 +163,10 @@ func (s *Server) saveSelectedCalendar(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, calendars.ErrInvalidSelectedCalendar) {
 			s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid selected calendar", true)
+			return
+		}
+		if errors.Is(err, calendars.ErrCalendarCatalogEntryNotFound) {
+			s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "Calendar not found", true)
 			return
 		}
 		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)

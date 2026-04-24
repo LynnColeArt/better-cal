@@ -176,7 +176,7 @@ Deliverables:
 - provider-specific credential structs;
 - app metadata reader or generated app catalog;
 - calendar, conferencing, CRM, analytics, and payment provider ports;
-- selected/destination calendar mutation flows; the first current-user route slice now supports `GET` and `POST` for selected calendars, `DELETE` by calendar ref, and `GET` plus `POST` for the current destination calendar using opaque refs plus non-secret provider metadata stored in dedicated calendar-management tables;
+- selected/destination calendar mutation flows; the first current-user route slice now supports `GET` and `POST` for selected calendars, `DELETE` by calendar ref, and `GET` plus `POST` for the current destination calendar using opaque refs plus non-secret provider metadata stored in dedicated calendar-management tables, while the next provider-backed slice now adds read routes for calendar connections and catalog rows and validates selected-calendar writes against that catalog before persisting the snapshot;
 - default conferencing app behavior;
 - explicit no-leak tests for credential fields.
 

@@ -132,6 +132,8 @@ func FixtureAPIKeyPrincipal() Principal {
 			"selected-calendars:write",
 			"destination-calendars:read",
 			"destination-calendars:write",
+			"calendar-connections:read",
+			"calendars:read",
 		},
 		CreatedAt: "2026-01-01T00:00:00.000Z",
 		UpdatedAt: "2026-01-01T00:00:00.000Z",

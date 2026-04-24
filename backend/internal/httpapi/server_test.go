@@ -20,18 +20,17 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer invalid", nil, http.StatusUnauthorized)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "cal_test_valid_mock", nil, http.StatusUnauthorized)
+	assertStatus(t, server.URL, http.MethodGet, "/v2/calendar-connections", "Bearer cal_test_valid_mock", nil, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodGet, "/v2/calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/selected-calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/destination-calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/selected-calendars", "Bearer cal_test_valid_mock", map[string]any{
-		"calendarRef": "starter-calendar",
-		"provider":    "google-calendar-fixture",
-		"externalId":  "google-starter-calendar",
-		"name":        "Starter Calendar",
+		"calendarRef": "team-calendar-fixture",
 	}, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodPost, "/v2/destination-calendars", "Bearer cal_test_valid_mock", map[string]any{
-		"calendarRef": "starter-calendar",
+		"calendarRef": "team-calendar-fixture",
 	}, http.StatusOK)
-	assertStatus(t, server.URL, http.MethodDelete, "/v2/selected-calendars/starter-calendar", "Bearer cal_test_valid_mock", nil, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodDelete, "/v2/selected-calendars/team-calendar-fixture", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/slots?eventTypeId=1001&start=2026-05-01T00:00:00.000Z&end=2026-05-02T00:00:00.000Z&timeZone=America%2FChicago", "", nil, http.StatusOK)
 
 	platformReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/oauth-clients/mock-platform-client", nil)
@@ -166,13 +165,41 @@ func TestCalendarManagementRoundTrip(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
+	connectionsReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/calendar-connections", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectionsReq.Header.Set("authorization", "Bearer cal_test_valid_mock")
+
+	resp, body := do(t, connectionsReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("connection status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"connectionRef":"google-calendar-connection-fixture"`)) {
+		t.Fatalf("body did not contain fixture connection: %s", body)
+	}
+
+	catalogReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/calendars", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogReq.Header.Set("authorization", "Bearer cal_test_valid_mock")
+
+	resp, body = do(t, catalogReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("catalog status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar-fixture"`)) {
+		t.Fatalf("body did not contain fixture team calendar: %s", body)
+	}
+
 	req, err := http.NewRequest(http.MethodGet, server.URL+"/v2/selected-calendars", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("authorization", "Bearer cal_test_valid_mock")
 
-	resp, body := do(t, req)
+	resp, body = do(t, req)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
 	}
@@ -184,10 +211,7 @@ func TestCalendarManagementRoundTrip(t *testing.T) {
 	}
 
 	saveReq, err := http.NewRequest(http.MethodPost, server.URL+"/v2/selected-calendars", bytes.NewReader([]byte(`{
-		"calendarRef": "team-calendar",
-		"provider": "google-calendar-fixture",
-		"externalId": "google-team-calendar",
-		"name": "Team Calendar"
+		"calendarRef": "team-calendar-fixture"
 	}`)))
 	if err != nil {
 		t.Fatal(err)
@@ -199,12 +223,12 @@ func TestCalendarManagementRoundTrip(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save status = %d, body = %s", resp.StatusCode, body)
 	}
-	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar"`)) {
-		t.Fatalf("save body did not contain team calendar: %s", body)
+	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar-fixture"`)) {
+		t.Fatalf("save body did not contain team fixture calendar: %s", body)
 	}
 
 	destinationReq, err := http.NewRequest(http.MethodPost, server.URL+"/v2/destination-calendars", bytes.NewReader([]byte(`{
-		"calendarRef": "team-calendar"
+		"calendarRef": "team-calendar-fixture"
 	}`)))
 	if err != nil {
 		t.Fatal(err)
@@ -216,8 +240,8 @@ func TestCalendarManagementRoundTrip(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("destination status = %d, body = %s", resp.StatusCode, body)
 	}
-	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar"`)) {
-		t.Fatalf("destination body did not contain team calendar: %s", body)
+	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar-fixture"`)) {
+		t.Fatalf("destination body did not contain team fixture calendar: %s", body)
 	}
 
 	readDestinationReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/destination-calendars", nil)
@@ -230,11 +254,11 @@ func TestCalendarManagementRoundTrip(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("read destination status = %d, body = %s", resp.StatusCode, body)
 	}
-	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar"`)) {
-		t.Fatalf("read destination body did not contain team calendar: %s", body)
+	if !bytes.Contains(body, []byte(`"calendarRef":"team-calendar-fixture"`)) {
+		t.Fatalf("read destination body did not contain team fixture calendar: %s", body)
 	}
 
-	deleteReq, err := http.NewRequest(http.MethodDelete, server.URL+"/v2/selected-calendars/team-calendar", nil)
+	deleteReq, err := http.NewRequest(http.MethodDelete, server.URL+"/v2/selected-calendars/team-calendar-fixture", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,132 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
+func (r *PostgresRepository) ReadCalendarConnections(ctx context.Context, userID int) ([]CalendarConnection, error) {
+	rows, err := r.pool.Query(ctx, `
+		select connection_ref, provider, account_ref, account_email, status
+		from calendar_connections
+		where user_id = $1
+		order by connection_ref
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("read calendar connections: %w", err)
+	}
+	defer rows.Close()
+
+	connections := []CalendarConnection{}
+	for rows.Next() {
+		var connection CalendarConnection
+		if err := rows.Scan(&connection.ConnectionRef, &connection.Provider, &connection.AccountRef, &connection.AccountEmail, &connection.Status); err != nil {
+			return nil, fmt.Errorf("scan calendar connection: %w", err)
+		}
+		connections = append(connections, connection)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read calendar connection rows: %w", err)
+	}
+	return connections, nil
+}
+
+func (r *PostgresRepository) SaveCalendarConnection(ctx context.Context, userID int, connection CalendarConnection) (CalendarConnection, error) {
+	if connection.ConnectionRef == "" || connection.Provider == "" || connection.AccountRef == "" || connection.AccountEmail == "" || connection.Status == "" {
+		return CalendarConnection{}, ErrInvalidSelectedCalendar
+	}
+
+	if _, err := r.pool.Exec(ctx, `
+		insert into calendar_connections (
+			user_id,
+			connection_ref,
+			provider,
+			account_ref,
+			account_email,
+			status
+		)
+		values ($1, $2, $3, $4, $5, $6)
+		on conflict (user_id, connection_ref) do update set
+			provider = excluded.provider,
+			account_ref = excluded.account_ref,
+			account_email = excluded.account_email,
+			status = excluded.status,
+			updated_at = now()
+	`, userID, connection.ConnectionRef, connection.Provider, connection.AccountRef, connection.AccountEmail, connection.Status); err != nil {
+		return CalendarConnection{}, fmt.Errorf("save calendar connection: %w", err)
+	}
+	return connection, nil
+}
+
+func (r *PostgresRepository) ReadCatalogCalendars(ctx context.Context, userID int) ([]CatalogCalendar, error) {
+	rows, err := r.pool.Query(ctx, `
+		select calendar_ref, connection_ref, provider, external_id, name, is_primary, writable
+		from calendar_catalog
+		where user_id = $1
+		order by calendar_ref
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("read catalog calendars: %w", err)
+	}
+	defer rows.Close()
+
+	calendars := []CatalogCalendar{}
+	for rows.Next() {
+		var calendar CatalogCalendar
+		if err := rows.Scan(&calendar.CalendarRef, &calendar.ConnectionRef, &calendar.Provider, &calendar.ExternalID, &calendar.Name, &calendar.Primary, &calendar.Writable); err != nil {
+			return nil, fmt.Errorf("scan catalog calendar: %w", err)
+		}
+		calendars = append(calendars, calendar)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read catalog calendar rows: %w", err)
+	}
+	return calendars, nil
+}
+
+func (r *PostgresRepository) SaveCatalogCalendar(ctx context.Context, userID int, calendar CatalogCalendar) (CatalogCalendar, error) {
+	if calendar.CalendarRef == "" || calendar.ConnectionRef == "" || calendar.Provider == "" || calendar.ExternalID == "" || calendar.Name == "" {
+		return CatalogCalendar{}, ErrInvalidSelectedCalendar
+	}
+
+	if _, err := r.pool.Exec(ctx, `
+		insert into calendar_catalog (
+			user_id,
+			calendar_ref,
+			connection_ref,
+			provider,
+			external_id,
+			name,
+			is_primary,
+			writable
+		)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)
+		on conflict (user_id, calendar_ref) do update set
+			connection_ref = excluded.connection_ref,
+			provider = excluded.provider,
+			external_id = excluded.external_id,
+			name = excluded.name,
+			is_primary = excluded.is_primary,
+			writable = excluded.writable,
+			updated_at = now()
+	`, userID, calendar.CalendarRef, calendar.ConnectionRef, calendar.Provider, calendar.ExternalID, calendar.Name, calendar.Primary, calendar.Writable); err != nil {
+		return CatalogCalendar{}, fmt.Errorf("save catalog calendar: %w", err)
+	}
+	return calendar, nil
+}
+
+func (r *PostgresRepository) ReadCatalogCalendar(ctx context.Context, userID int, calendarRef string) (CatalogCalendar, bool, error) {
+	var calendar CatalogCalendar
+	err := r.pool.QueryRow(ctx, `
+		select calendar_ref, connection_ref, provider, external_id, name, is_primary, writable
+		from calendar_catalog
+		where user_id = $1 and calendar_ref = $2
+	`, userID, calendarRef).Scan(&calendar.CalendarRef, &calendar.ConnectionRef, &calendar.Provider, &calendar.ExternalID, &calendar.Name, &calendar.Primary, &calendar.Writable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CatalogCalendar{}, false, nil
+	}
+	if err != nil {
+		return CatalogCalendar{}, false, fmt.Errorf("read catalog calendar by ref: %w", err)
+	}
+	return calendar, true, nil
+}
+
 func (r *PostgresRepository) ReadSelectedCalendars(ctx context.Context, userID int) ([]SelectedCalendar, error) {
 	rows, err := r.pool.Query(ctx, `
 		select calendar_ref, provider, external_id, name

@@ -189,6 +189,48 @@
       ]
     },
     {
+      "id": "policy.calendar-connections.read",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "calendar-connections:read"
+      ],
+      "resourceResolver": "current-principal-calendar-connections",
+      "negativeFixtures": [
+        "missing-credential",
+        "insufficient-permission"
+      ]
+    },
+    {
+      "id": "policy.calendars.read",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "calendars:read"
+      ],
+      "resourceResolver": "current-principal-calendar-catalog",
+      "negativeFixtures": [
+        "missing-credential",
+        "insufficient-permission"
+      ]
+    },
+    {
       "id": "policy.selected-calendars.read",
       "status": "draft",
       "authModes": [

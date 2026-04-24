@@ -140,6 +140,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.health)
 	s.mux.HandleFunc("GET /v2/me", s.me)
+	s.mux.HandleFunc("GET /v2/calendar-connections", s.readCalendarConnections)
+	s.mux.HandleFunc("GET /v2/calendars", s.readCalendarCatalog)
 	s.mux.HandleFunc("GET /v2/selected-calendars", s.readSelectedCalendars)
 	s.mux.HandleFunc("POST /v2/selected-calendars", s.saveSelectedCalendar)
 	s.mux.HandleFunc("DELETE /v2/selected-calendars/{calendarRef}", s.deleteSelectedCalendar)

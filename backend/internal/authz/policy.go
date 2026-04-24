@@ -12,6 +12,8 @@ const (
 	PolicyBookingWrite              Policy = "policy.booking.write"
 	PolicyBookingHostAction         Policy = "policy.booking.host-action"
 	PolicySlotsRead                 Policy = "policy.slots.read"
+	PolicyCalendarConnectionsRead   Policy = "policy.calendar-connections.read"
+	PolicyCalendarsRead             Policy = "policy.calendars.read"
 	PolicySelectedCalendarsRead     Policy = "policy.selected-calendars.read"
 	PolicySelectedCalendarsWrite    Policy = "policy.selected-calendars.write"
 	PolicyDestinationCalendarsRead  Policy = "policy.destination-calendars.read"
@@ -42,6 +44,8 @@ func NewAuthorizer() *Authorizer {
 			PolicyBookingWrite:              {"booking:write"},
 			PolicyBookingHostAction:         {"booking:host-action"},
 			PolicySlotsRead:                 {},
+			PolicyCalendarConnectionsRead:   {"calendar-connections:read"},
+			PolicyCalendarsRead:             {"calendars:read"},
 			PolicySelectedCalendarsRead:     {"selected-calendars:read"},
 			PolicySelectedCalendarsWrite:    {"selected-calendars:write"},
 			PolicyDestinationCalendarsRead:  {"destination-calendars:read"},

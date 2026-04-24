@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestPostgresRepositoryRoundTripSelectedAndDestinationCalendars(t *testing.T) {
+func TestPostgresRepositoryRoundTripConnectionsAndCatalogCalendars(t *testing.T) {
 	pool := testPostgresPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -20,23 +20,134 @@ func TestPostgresRepositoryRoundTripSelectedAndDestinationCalendars(t *testing.T
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		_, _ = pool.Exec(cleanupCtx, `delete from destination_calendars where user_id = $1`, userID)
-		_, _ = pool.Exec(cleanupCtx, `delete from selected_calendars where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_catalog where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_connections where user_id = $1`, userID)
 	})
 
-	first := SelectedCalendar{
-		CalendarRef: "alpha-calendar",
-		Provider:    "google-calendar-fixture",
-		ExternalID:  "google-alpha-calendar",
-		Name:        "Alpha Calendar",
+	connection := CalendarConnection{
+		ConnectionRef: "google-connection",
+		Provider:      "google-calendar-fixture",
+		AccountRef:    "google-account",
+		AccountEmail:  "fixture-user@example.test",
+		Status:        "active",
 	}
-	second := SelectedCalendar{
-		CalendarRef: "team-calendar",
-		Provider:    "google-calendar-fixture",
-		ExternalID:  "google-team-calendar",
-		Name:        "Team Calendar",
+	if _, err := repo.SaveCalendarConnection(ctx, userID, connection); err != nil {
+		t.Fatal(err)
 	}
 
+	first := CatalogCalendar{
+		CalendarRef:   "alpha-calendar",
+		ConnectionRef: connection.ConnectionRef,
+		Provider:      "google-calendar-fixture",
+		ExternalID:    "google-alpha-calendar",
+		Name:          "Alpha Calendar",
+		Writable:      true,
+	}
+	second := CatalogCalendar{
+		CalendarRef:   "team-calendar",
+		ConnectionRef: connection.ConnectionRef,
+		Provider:      "google-calendar-fixture",
+		ExternalID:    "google-team-calendar",
+		Name:          "Team Calendar",
+		Primary:       true,
+		Writable:      true,
+	}
+	if _, err := repo.SaveCatalogCalendar(ctx, userID, second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveCatalogCalendar(ctx, userID, first); err != nil {
+		t.Fatal(err)
+	}
+
+	connections, err := repo.ReadCalendarConnections(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connections) != 1 {
+		t.Fatalf("connection count = %d", len(connections))
+	}
+	if connections[0].ConnectionRef != connection.ConnectionRef {
+		t.Fatalf("connection ref = %q", connections[0].ConnectionRef)
+	}
+
+	catalog, err := repo.ReadCatalogCalendars(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) != 2 {
+		t.Fatalf("catalog calendar count = %d", len(catalog))
+	}
+	if catalog[0].CalendarRef != first.CalendarRef || catalog[1].CalendarRef != second.CalendarRef {
+		t.Fatalf("catalog calendars = %#v", catalog)
+	}
+
+	found, ok, err := repo.ReadCatalogCalendar(ctx, userID, second.CalendarRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("catalog calendar was not found")
+	}
+	if found.ConnectionRef != connection.ConnectionRef {
+		t.Fatalf("catalog connection ref = %q", found.ConnectionRef)
+	}
+	if !found.Primary {
+		t.Fatal("catalog primary flag was not persisted")
+	}
+}
+
+func TestPostgresRepositoryRoundTripSelectedAndDestinationCalendars(t *testing.T) {
+	pool := testPostgresPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	userID := int(time.Now().UnixNano()%1_000_000_000) + 20_000
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from destination_calendars where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from selected_calendars where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_catalog where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_connections where user_id = $1`, userID)
+	})
+
+	connection := CalendarConnection{
+		ConnectionRef: "google-connection",
+		Provider:      "google-calendar-fixture",
+		AccountRef:    "google-account",
+		AccountEmail:  "fixture-user@example.test",
+		Status:        "active",
+	}
+	if _, err := repo.SaveCalendarConnection(ctx, userID, connection); err != nil {
+		t.Fatal(err)
+	}
+
+	firstCatalog := CatalogCalendar{
+		CalendarRef:   "alpha-calendar",
+		ConnectionRef: connection.ConnectionRef,
+		Provider:      "google-calendar-fixture",
+		ExternalID:    "google-alpha-calendar",
+		Name:          "Alpha Calendar",
+		Writable:      true,
+	}
+	secondCatalog := CatalogCalendar{
+		CalendarRef:   "team-calendar",
+		ConnectionRef: connection.ConnectionRef,
+		Provider:      "google-calendar-fixture",
+		ExternalID:    "google-team-calendar",
+		Name:          "Team Calendar",
+		Writable:      true,
+	}
+	if _, err := repo.SaveCatalogCalendar(ctx, userID, firstCatalog); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveCatalogCalendar(ctx, userID, secondCatalog); err != nil {
+		t.Fatal(err)
+	}
+
+	first := toSelectedCalendar(firstCatalog)
+	second := toSelectedCalendar(secondCatalog)
 	if _, err := repo.SaveSelectedCalendar(ctx, userID, second); err != nil {
 		t.Fatal(err)
 	}
@@ -78,30 +189,48 @@ func TestPostgresRepositoryDeleteSelectedCalendarClearsDestination(t *testing.T)
 	defer cancel()
 
 	repo := NewPostgresRepository(pool)
-	userID := int(time.Now().UnixNano()%1_000_000_000) + 20_000
+	userID := int(time.Now().UnixNano()%1_000_000_000) + 30_000
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
 		_, _ = pool.Exec(cleanupCtx, `delete from destination_calendars where user_id = $1`, userID)
 		_, _ = pool.Exec(cleanupCtx, `delete from selected_calendars where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_catalog where user_id = $1`, userID)
+		_, _ = pool.Exec(cleanupCtx, `delete from calendar_connections where user_id = $1`, userID)
 	})
 
-	calendar := SelectedCalendar{
-		CalendarRef: "team-calendar",
-		Provider:    "google-calendar-fixture",
-		ExternalID:  "google-team-calendar",
-		Name:        "Team Calendar",
+	connection := CalendarConnection{
+		ConnectionRef: "google-connection",
+		Provider:      "google-calendar-fixture",
+		AccountRef:    "google-account",
+		AccountEmail:  "fixture-user@example.test",
+		Status:        "active",
 	}
-	if _, err := repo.SaveSelectedCalendar(ctx, userID, calendar); err != nil {
+	if _, err := repo.SaveCalendarConnection(ctx, userID, connection); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := repo.SetDestinationCalendar(ctx, userID, calendar.CalendarRef); err != nil {
+
+	catalog := CatalogCalendar{
+		CalendarRef:   "team-calendar",
+		ConnectionRef: connection.ConnectionRef,
+		Provider:      "google-calendar-fixture",
+		ExternalID:    "google-team-calendar",
+		Name:          "Team Calendar",
+		Writable:      true,
+	}
+	if _, err := repo.SaveCatalogCalendar(ctx, userID, catalog); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveSelectedCalendar(ctx, userID, toSelectedCalendar(catalog)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := repo.SetDestinationCalendar(ctx, userID, catalog.CalendarRef); err != nil {
 		t.Fatal(err)
 	} else if !ok {
 		t.Fatal("destination calendar was not set")
 	}
 
-	result, err := repo.DeleteSelectedCalendar(ctx, userID, calendar.CalendarRef)
+	result, err := repo.DeleteSelectedCalendar(ctx, userID, catalog.CalendarRef)
 	if err != nil {
 		t.Fatal(err)
 	}
