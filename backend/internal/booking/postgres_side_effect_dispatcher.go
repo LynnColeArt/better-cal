@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,6 +26,7 @@ type PostgresSideEffectDispatcher struct {
 	webhookTransport    WebhookAttemptTransport
 	emailTransport      EmailDeliveryTransport
 	emailDispatchURL    string
+	calendarProvider    calendar.ProviderAdapter
 	calendarTransport   CalendarDispatchTransport
 	calendarDispatchURL string
 	maxAttempts         int
@@ -44,6 +46,14 @@ func WithCalendarTransport(transport CalendarDispatchTransport) PostgresSideEffe
 	return func(d *PostgresSideEffectDispatcher) {
 		if transport != nil {
 			d.calendarTransport = transport
+		}
+	}
+}
+
+func WithCalendarProvider(provider calendar.ProviderAdapter) PostgresSideEffectDispatcherOption {
+	return func(d *PostgresSideEffectDispatcher) {
+		if provider != nil {
+			d.calendarProvider = provider
 		}
 	}
 }
@@ -75,6 +85,7 @@ func NewPostgresSideEffectDispatcher(pool *pgxpool.Pool, bookings BookingReader,
 		subscriptions:    subscriptions,
 		secretResolver:   secretResolver,
 		webhookTransport: transport,
+		calendarProvider: calendar.NewGoogleFixtureProvider(),
 		maxAttempts:      defaultWebhookMaxAttempts,
 	}
 	for _, opt := range opts {
@@ -169,7 +180,11 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 			return errors.New("calendar dispatch requires a transport")
 		}
 		for _, attempt := range pendingCalendarAttempts {
-			receipt, err := d.calendarTransport.DeliverCalendarDispatch(ctx, attempt)
+			prepared, err := d.prepareCalendarProviderDispatch(ctx, attempt)
+			if err != nil {
+				return err
+			}
+			receipt, err := d.calendarTransport.DeliverCalendarDispatch(ctx, prepared)
 			statusCode := calendarDispatchStatusCode(receipt, err)
 			if err != nil {
 				if markErr := markCalendarDispatchFailed(ctx, d.pool, attempt.ID, statusCode, err); markErr != nil {

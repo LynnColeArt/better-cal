@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/calendar"
 	"github.com/LynnColeArt/better-cal/backend/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -596,6 +597,7 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 	var requestCount atomic.Int32
 	var capturedBody atomic.Value
 	var capturedAction atomic.Value
+	var capturedProvider atomic.Value
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
 		bodyRaw, err := io.ReadAll(r.Body)
@@ -605,6 +607,7 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 		}
 		capturedBody.Store(string(bodyRaw))
 		capturedAction.Store(r.Header.Get("X-Cal-Calendar-Action"))
+		capturedProvider.Store(r.Header.Get("X-Cal-Calendar-Provider"))
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer server.Close()
@@ -647,6 +650,7 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		WithCalendarProvider(calendar.NewGoogleFixtureProvider()),
 		WithCalendarTransport(NewHTTPCalendarTransport(server.Client())),
 		WithCalendarDispatchURL(targetURL),
 	)
@@ -791,11 +795,34 @@ func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
 	if attemptEnvelope.Payload.RescheduleUID != envelope.Payload.RescheduleUID {
 		t.Fatalf("attempt payload reschedule uid = %q", attemptEnvelope.Payload.RescheduleUID)
 	}
-	if got, _ := capturedBody.Load().(string); got != attemptBody {
-		t.Fatalf("captured calendar body = %q", got)
+
+	var providerRequest calendar.GoogleFixtureDispatchRequest
+	if err := json.Unmarshal([]byte(capturedBody.Load().(string)), &providerRequest); err != nil {
+		t.Fatal(err)
+	}
+	if providerRequest.Provider != "google-calendar-fixture" {
+		t.Fatalf("provider request provider = %q", providerRequest.Provider)
+	}
+	if providerRequest.Operation != "move_event" {
+		t.Fatalf("provider request operation = %q", providerRequest.Operation)
+	}
+	if providerRequest.Event.ID != uid {
+		t.Fatalf("provider request event id = %q", providerRequest.Event.ID)
+	}
+	if providerRequest.Event.Start != bookingValue.Start {
+		t.Fatalf("provider request event start = %q", providerRequest.Event.Start)
+	}
+	if providerRequest.Event.End != bookingValue.End {
+		t.Fatalf("provider request event end = %q", providerRequest.Event.End)
+	}
+	if providerRequest.Event.PreviousID != rescheduleUID {
+		t.Fatalf("provider request previous id = %q", providerRequest.Event.PreviousID)
 	}
 	if got, _ := capturedAction.Load().(string); got != string(CalendarDispatchBookingRescheduled) {
 		t.Fatalf("captured calendar action = %q", got)
+	}
+	if got, _ := capturedProvider.Load().(string); got != "google-calendar-fixture" {
+		t.Fatalf("captured calendar provider = %q", got)
 	}
 }
 

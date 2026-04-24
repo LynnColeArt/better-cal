@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/calendar"
 )
 
 const defaultCalendarTransportTimeout = 5 * time.Second
@@ -27,7 +29,7 @@ type CalendarDispatchReceipt struct {
 }
 
 type CalendarDispatchTransport interface {
-	DeliverCalendarDispatch(context.Context, CalendarDispatchAttempt) (CalendarDispatchReceipt, error)
+	DeliverCalendarDispatch(context.Context, calendar.PreparedDispatch) (CalendarDispatchReceipt, error)
 }
 
 type HTTPCalendarTransport struct {
@@ -41,20 +43,25 @@ func NewHTTPCalendarTransport(client *http.Client) HTTPCalendarTransport {
 	return HTTPCalendarTransport{client: client}
 }
 
-func (t HTTPCalendarTransport) DeliverCalendarDispatch(ctx context.Context, attempt CalendarDispatchAttempt) (CalendarDispatchReceipt, error) {
+func (t HTTPCalendarTransport) DeliverCalendarDispatch(ctx context.Context, dispatch calendar.PreparedDispatch) (CalendarDispatchReceipt, error) {
 	if t.client == nil {
 		return CalendarDispatchReceipt{}, CalendarDispatchError{}
 	}
-	if attempt.TargetURL == "" || attempt.Body == "" || attempt.ContentType == "" || attempt.Action == "" {
+	if dispatch.TargetURL == "" || dispatch.Body == "" || dispatch.ContentType == "" {
 		return CalendarDispatchReceipt{}, CalendarDispatchError{}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, attempt.TargetURL, strings.NewReader(attempt.Body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, dispatch.TargetURL, strings.NewReader(dispatch.Body))
 	if err != nil {
 		return CalendarDispatchReceipt{}, CalendarDispatchError{}
 	}
-	req.Header.Set("Content-Type", attempt.ContentType)
-	req.Header.Set("X-Cal-Calendar-Action", attempt.Action)
+	req.Header.Set("Content-Type", dispatch.ContentType)
+	for name, value := range dispatch.Headers {
+		if name == "" || value == "" {
+			continue
+		}
+		req.Header.Set(name, value)
+	}
 
 	resp, err := t.client.Do(req)
 	if err != nil {
