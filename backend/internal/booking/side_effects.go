@@ -79,7 +79,14 @@ func (FixtureSideEffectPort) PlanBookingCancelled(_ context.Context, event Booki
 
 func (FixtureSideEffectPort) PlanBookingRescheduled(_ context.Context, event BookingRescheduledSideEffect) ([]PlannedSideEffect, error) {
 	return []PlannedSideEffect{
-		{Name: SideEffectCalendarRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
+		{
+			Name:       SideEffectCalendarRescheduled,
+			BookingUID: event.NewBooking.UID,
+			RequestID:  event.NewBooking.RequestID,
+			Payload: map[string]any{
+				"rescheduleUid": event.OldBooking.UID,
+			},
+		},
 		{Name: SideEffectEmailRescheduled, BookingUID: event.NewBooking.UID, RequestID: event.NewBooking.RequestID},
 		{
 			Name:       SideEffectWebhookBookingRescheduled,

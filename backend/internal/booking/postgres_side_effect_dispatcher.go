@@ -18,12 +18,14 @@ type BookingReader interface {
 }
 
 type PostgresSideEffectDispatcher struct {
-	pool           *pgxpool.Pool
-	bookings       BookingReader
-	subscriptions  WebhookSubscriptionStore
-	secretResolver WebhookSigningSecretResolver
-	transport      WebhookAttemptTransport
-	maxAttempts    int
+	pool                *pgxpool.Pool
+	bookings            BookingReader
+	subscriptions       WebhookSubscriptionStore
+	secretResolver      WebhookSigningSecretResolver
+	webhookTransport    WebhookAttemptTransport
+	calendarTransport   CalendarDispatchTransport
+	calendarDispatchURL string
+	maxAttempts         int
 }
 
 type PostgresSideEffectDispatcherOption func(*PostgresSideEffectDispatcher)
@@ -36,14 +38,28 @@ func WithWebhookMaxAttempts(maxAttempts int) PostgresSideEffectDispatcherOption 
 	}
 }
 
+func WithCalendarTransport(transport CalendarDispatchTransport) PostgresSideEffectDispatcherOption {
+	return func(d *PostgresSideEffectDispatcher) {
+		if transport != nil {
+			d.calendarTransport = transport
+		}
+	}
+}
+
+func WithCalendarDispatchURL(targetURL string) PostgresSideEffectDispatcherOption {
+	return func(d *PostgresSideEffectDispatcher) {
+		d.calendarDispatchURL = targetURL
+	}
+}
+
 func NewPostgresSideEffectDispatcher(pool *pgxpool.Pool, bookings BookingReader, subscriptions WebhookSubscriptionStore, secretResolver WebhookSigningSecretResolver, transport WebhookAttemptTransport, opts ...PostgresSideEffectDispatcherOption) PostgresSideEffectDispatcher {
 	dispatcher := PostgresSideEffectDispatcher{
-		pool:           pool,
-		bookings:       bookings,
-		subscriptions:  subscriptions,
-		secretResolver: secretResolver,
-		transport:      transport,
-		maxAttempts:    defaultWebhookMaxAttempts,
+		pool:             pool,
+		bookings:         bookings,
+		subscriptions:    subscriptions,
+		secretResolver:   secretResolver,
+		webhookTransport: transport,
+		maxAttempts:      defaultWebhookMaxAttempts,
 	}
 	for _, opt := range opts {
 		opt(&dispatcher)
@@ -59,7 +75,8 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 		return fmt.Errorf("invalid planned side effect dispatch record")
 	}
 
-	pendingAttempts := []WebhookDeliveryAttempt{}
+	pendingWebhookAttempts := []WebhookDeliveryAttempt{}
+	pendingCalendarAttempts := []CalendarDispatchAttempt{}
 	if err := db.WithTx(ctx, d.pool, func(tx db.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			insert into booking_side_effect_dispatch_log (side_effect_id, booking_uid, name, request_id)
@@ -70,35 +87,59 @@ func (d PostgresSideEffectDispatcher) Dispatch(ctx context.Context, effect Plann
 		}
 
 		var err error
-		pendingAttempts, err = d.prepareWebhookAttempts(ctx, tx, effect)
+		pendingWebhookAttempts, err = d.prepareWebhookAttempts(ctx, tx, effect)
+		if err != nil {
+			return err
+		}
+		pendingCalendarAttempts, err = d.prepareCalendarAttempts(ctx, tx, effect)
 		return err
 	}); err != nil {
 		return err
 	}
 
-	if len(pendingAttempts) == 0 {
-		return nil
-	}
-	if d.transport == nil {
-		return errors.New("webhook dispatch requires a transport")
+	var dispatchErr error
+	if len(pendingWebhookAttempts) > 0 {
+		if d.webhookTransport == nil {
+			return errors.New("webhook dispatch requires a transport")
+		}
+		for _, attempt := range pendingWebhookAttempts {
+			receipt, err := d.webhookTransport.DeliverWebhookAttempt(ctx, attempt)
+			statusCode := webhookAttemptStatusCode(receipt, err)
+			if err != nil {
+				result, markErr := markWebhookAttemptFailed(ctx, d.pool, attempt.ID, statusCode, err, d.maxAttempts)
+				if markErr != nil {
+					return fmt.Errorf("mark webhook attempt failed: %w", markErr)
+				}
+				if dispatchErr == nil && !result.DeadLettered {
+					dispatchErr = err
+				}
+				continue
+			}
+			if err := markWebhookAttemptDelivered(ctx, d.pool, attempt.ID, statusCode); err != nil {
+				return fmt.Errorf("mark webhook attempt delivered: %w", err)
+			}
+		}
 	}
 
-	var dispatchErr error
-	for _, attempt := range pendingAttempts {
-		receipt, err := d.transport.DeliverWebhookAttempt(ctx, attempt)
-		statusCode := webhookAttemptStatusCode(receipt, err)
-		if err != nil {
-			result, markErr := markWebhookAttemptFailed(ctx, d.pool, attempt.ID, statusCode, err, d.maxAttempts)
-			if markErr != nil {
-				return fmt.Errorf("mark webhook attempt failed: %w", markErr)
-			}
-			if dispatchErr == nil && !result.DeadLettered {
-				dispatchErr = err
-			}
-			continue
+	if len(pendingCalendarAttempts) > 0 {
+		if d.calendarTransport == nil {
+			return errors.New("calendar dispatch requires a transport")
 		}
-		if err := markWebhookAttemptDelivered(ctx, d.pool, attempt.ID, statusCode); err != nil {
-			return fmt.Errorf("mark webhook attempt delivered: %w", err)
+		for _, attempt := range pendingCalendarAttempts {
+			receipt, err := d.calendarTransport.DeliverCalendarDispatch(ctx, attempt)
+			statusCode := calendarDispatchStatusCode(receipt, err)
+			if err != nil {
+				if markErr := markCalendarDispatchFailed(ctx, d.pool, attempt.ID, statusCode, err); markErr != nil {
+					return fmt.Errorf("mark calendar dispatch failed: %w", markErr)
+				}
+				if dispatchErr == nil {
+					dispatchErr = err
+				}
+				continue
+			}
+			if err := markCalendarDispatchDelivered(ctx, d.pool, attempt.ID, statusCode); err != nil {
+				return fmt.Errorf("mark calendar dispatch delivered: %w", err)
+			}
 		}
 	}
 	return dispatchErr
@@ -273,6 +314,217 @@ func readPendingWebhookAttempts(ctx context.Context, tx db.Tx, sideEffectID int6
 	return attempts, nil
 }
 
+func (d PostgresSideEffectDispatcher) prepareCalendarAttempts(ctx context.Context, tx db.Tx, effect PlannedSideEffectRecord) ([]CalendarDispatchAttempt, error) {
+	if _, ok := calendarDispatchActionForSideEffect(effect.Name); !ok {
+		return nil, nil
+	}
+
+	dispatchRecord, found, err := readCalendarDispatch(ctx, tx, effect.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		dispatchRecord, err = d.buildCalendarDispatch(ctx, effect)
+		if err != nil {
+			return nil, err
+		}
+		if dispatchRecord == nil {
+			return nil, nil
+		}
+		dispatchID, err := upsertCalendarDispatch(ctx, tx, effect, dispatchRecord)
+		if err != nil {
+			return nil, err
+		}
+		dispatchRecord.ID = dispatchID
+	}
+
+	attemptCount, err := countCalendarDispatchAttempts(ctx, tx, dispatchRecord.ID)
+	if err != nil {
+		return nil, err
+	}
+	if attemptCount == 0 {
+		attempts, err := d.calendarAttemptTemplates(dispatchRecord)
+		if err != nil {
+			return nil, err
+		}
+		if err := recordCalendarDispatchAttempts(ctx, tx, effect, dispatchRecord.ID, dispatchRecord, attempts); err != nil {
+			return nil, err
+		}
+	}
+
+	return readPendingCalendarDispatchAttempts(ctx, tx, effect.ID)
+}
+
+type calendarDispatchRecord struct {
+	ID          int64
+	Action      string
+	ContentType string
+	CreatedAt   string
+	Body        string
+}
+
+func readCalendarDispatch(ctx context.Context, tx db.Tx, sideEffectID int64) (*calendarDispatchRecord, bool, error) {
+	var dispatchRecord calendarDispatchRecord
+	err := tx.QueryRow(ctx, `
+		select id, action, content_type, created_at_wire, body
+		from booking_calendar_dispatches
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&dispatchRecord.ID, &dispatchRecord.Action, &dispatchRecord.ContentType, &dispatchRecord.CreatedAt, &dispatchRecord.Body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read calendar dispatch: %w", err)
+	}
+	return &dispatchRecord, true, nil
+}
+
+func upsertCalendarDispatch(ctx context.Context, tx db.Tx, effect PlannedSideEffectRecord, dispatchRecord *calendarDispatchRecord) (int64, error) {
+	var dispatchID int64
+	err := tx.QueryRow(ctx, `
+		with inserted as (
+			insert into booking_calendar_dispatches (
+				side_effect_id,
+				booking_uid,
+				request_id,
+				action,
+				content_type,
+				created_at_wire,
+				body
+			)
+			values ($1, $2, $3, $4, $5, $6, $7)
+			on conflict (side_effect_id) do nothing
+			returning id
+		)
+		select id from inserted
+		union all
+		select id
+		from booking_calendar_dispatches
+		where side_effect_id = $1
+		limit 1
+	`, effect.ID, effect.BookingUID, effect.RequestID, dispatchRecord.Action, dispatchRecord.ContentType, dispatchRecord.CreatedAt, dispatchRecord.Body).Scan(&dispatchID)
+	if err != nil {
+		return 0, fmt.Errorf("record calendar dispatch: %w", err)
+	}
+	return dispatchID, nil
+}
+
+func countCalendarDispatchAttempts(ctx context.Context, tx db.Tx, dispatchID int64) (int, error) {
+	var count int
+	if err := tx.QueryRow(ctx, `
+		select count(*)
+		from booking_calendar_dispatch_attempts
+		where dispatch_id = $1
+	`, dispatchID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count calendar dispatch attempts: %w", err)
+	}
+	return count, nil
+}
+
+func recordCalendarDispatchAttempts(ctx context.Context, tx db.Tx, effect PlannedSideEffectRecord, dispatchID int64, dispatchRecord *calendarDispatchRecord, attempts []CalendarDispatchAttempt) error {
+	for _, attempt := range attempts {
+		if _, err := tx.Exec(ctx, `
+			insert into booking_calendar_dispatch_attempts (
+				dispatch_id,
+				side_effect_id,
+				target_url,
+				action,
+				content_type,
+				body
+			)
+			values ($1, $2, $3, $4, $5, $6)
+			on conflict (dispatch_id, target_url) do nothing
+		`, dispatchID, effect.ID, attempt.TargetURL, dispatchRecord.Action, dispatchRecord.ContentType, dispatchRecord.Body); err != nil {
+			return fmt.Errorf("record calendar dispatch attempt: %w", err)
+		}
+	}
+	return nil
+}
+
+func readPendingCalendarDispatchAttempts(ctx context.Context, tx db.Tx, sideEffectID int64) ([]CalendarDispatchAttempt, error) {
+	rows, err := tx.Query(ctx, `
+		select id, dispatch_id, side_effect_id, target_url, action, content_type, body
+		from booking_calendar_dispatch_attempts
+		where side_effect_id = $1
+			and delivered_at is null
+		order by id
+	`, sideEffectID)
+	if err != nil {
+		return nil, fmt.Errorf("read pending calendar dispatch attempts: %w", err)
+	}
+	defer rows.Close()
+
+	attempts := []CalendarDispatchAttempt{}
+	for rows.Next() {
+		var attempt CalendarDispatchAttempt
+		if err := rows.Scan(
+			&attempt.ID,
+			&attempt.DispatchID,
+			&attempt.SideEffectID,
+			&attempt.TargetURL,
+			&attempt.Action,
+			&attempt.ContentType,
+			&attempt.Body,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending calendar dispatch attempt: %w", err)
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read pending calendar dispatch attempt rows: %w", err)
+	}
+	return attempts, nil
+}
+
+func markCalendarDispatchDelivered(ctx context.Context, pool *pgxpool.Pool, attemptID int64, statusCode int) error {
+	if pool == nil {
+		return db.ErrNilPool
+	}
+	var updatedID int64
+	err := pool.QueryRow(ctx, `
+		update booking_calendar_dispatch_attempts
+		set delivered_at = now(),
+			response_status = $2,
+			last_error = null,
+			last_attempted_at = now(),
+			attempt_count = booking_calendar_dispatch_attempts.attempt_count + 1
+		where id = $1
+			and delivered_at is null
+		returning id
+	`, attemptID, nullableStatusCode(statusCode)).Scan(&updatedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("calendar dispatch attempt %d was not pending", attemptID)
+	}
+	if err != nil {
+		return fmt.Errorf("update delivered calendar dispatch attempt: %w", err)
+	}
+	return nil
+}
+
+func markCalendarDispatchFailed(ctx context.Context, pool *pgxpool.Pool, attemptID int64, statusCode int, dispatchErr error) error {
+	if pool == nil {
+		return db.ErrNilPool
+	}
+	var updatedID int64
+	err := pool.QueryRow(ctx, `
+		update booking_calendar_dispatch_attempts
+		set response_status = $2,
+			last_error = $3,
+			last_attempted_at = now(),
+			attempt_count = booking_calendar_dispatch_attempts.attempt_count + 1
+		where id = $1
+			and delivered_at is null
+		returning id
+	`, attemptID, nullableStatusCode(statusCode), safeCalendarDispatchError(dispatchErr)).Scan(&updatedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("calendar dispatch attempt %d was not pending", attemptID)
+	}
+	if err != nil {
+		return fmt.Errorf("update failed calendar dispatch attempt: %w", err)
+	}
+	return nil
+}
+
 func markWebhookAttemptDelivered(ctx context.Context, pool *pgxpool.Pool, attemptID int64, statusCode int) error {
 	if pool == nil {
 		return db.ErrNilPool
@@ -400,6 +652,46 @@ func (d PostgresSideEffectDispatcher) buildWebhookDelivery(ctx context.Context, 
 	}, nil
 }
 
+func (d PostgresSideEffectDispatcher) buildCalendarDispatch(ctx context.Context, effect PlannedSideEffectRecord) (*calendarDispatchRecord, error) {
+	envelope, ok, err := d.calendarDispatchEnvelope(ctx, effect)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	bodyRaw, err := json.Marshal(envelope)
+	if err != nil {
+		return nil, fmt.Errorf("encode calendar dispatch body: %w", err)
+	}
+	return &calendarDispatchRecord{
+		Action:      string(envelope.Action),
+		ContentType: "application/json",
+		CreatedAt:   envelope.CreatedAt,
+		Body:        string(bodyRaw),
+	}, nil
+}
+
+func (d PostgresSideEffectDispatcher) calendarDispatchEnvelope(ctx context.Context, effect PlannedSideEffectRecord) (CalendarDispatchEnvelope, bool, error) {
+	if _, ok := calendarDispatchActionForSideEffect(effect.Name); !ok {
+		return CalendarDispatchEnvelope{}, false, nil
+	}
+	if d.bookings == nil {
+		return CalendarDispatchEnvelope{}, false, errors.New("calendar dispatch requires a booking reader")
+	}
+
+	bookingValue, found, err := d.bookings.ReadByUID(ctx, effect.BookingUID)
+	if err != nil {
+		return CalendarDispatchEnvelope{}, false, fmt.Errorf("read booking for calendar dispatch: %w", err)
+	}
+	if !found {
+		return CalendarDispatchEnvelope{}, false, fmt.Errorf("read booking for calendar dispatch %q: not found", effect.BookingUID)
+	}
+
+	envelope, ok := calendarDispatchEnvelopeForBooking(effect, bookingValue)
+	return envelope, ok, nil
+}
+
 func (d PostgresSideEffectDispatcher) webhookEnvelope(ctx context.Context, effect PlannedSideEffectRecord) (WebhookDeliveryEnvelope, bool, error) {
 	if _, ok := webhookTriggerEventForSideEffect(effect.Name); !ok {
 		return WebhookDeliveryEnvelope{}, false, nil
@@ -457,4 +749,21 @@ func (d PostgresSideEffectDispatcher) webhookAttemptTemplates(ctx context.Contex
 		})
 	}
 	return attempts, nil
+}
+
+func (d PostgresSideEffectDispatcher) calendarAttemptTemplates(dispatchRecord *calendarDispatchRecord) ([]CalendarDispatchAttempt, error) {
+	if dispatchRecord == nil {
+		return nil, nil
+	}
+	if d.calendarDispatchURL == "" {
+		return nil, errors.New("calendar dispatch requires a target url")
+	}
+	return []CalendarDispatchAttempt{
+		{
+			TargetURL:   d.calendarDispatchURL,
+			Action:      dispatchRecord.Action,
+			ContentType: dispatchRecord.ContentType,
+			Body:        dispatchRecord.Body,
+		},
+	}, nil
 }

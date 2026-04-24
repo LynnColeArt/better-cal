@@ -112,9 +112,11 @@ Booking:
 - booking side-effect dispatch failures remain retryable without storing raw provider error details;
 - booking dispatch logs contain only side-effect ids, names, booking ids, request ids, and timestamps;
 - booking queued webhook payload hints contain only contract fields needed for retry-safe delivery reconstruction;
+- booking queued calendar payload hints and calendar dispatch envelopes contain only contract fields needed for retry-safe delivery reconstruction and do not store attendee ids, responses, metadata, provider credentials, or raw provider responses;
 - booking webhook subscriptions select only active subscribers for the matching trigger event;
 - booking webhook signing secrets never appear in subscription, delivery, or attempt tables and are resolved only through key refs at dispatch time;
 - booking webhook retry skips subscriber attempts already marked delivered and stores only response codes plus generic failure text;
+- booking calendar canary retry skips attempts already marked delivered and stores only response codes plus generic failure text;
 - booking webhook attempts are dead-lettered after the configured threshold and disabled subscriptions are not reactivated by fixture seeding;
 - booking cancel by unauthorized user;
 - booking reschedule by unauthorized user;

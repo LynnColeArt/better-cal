@@ -10,6 +10,7 @@ const (
 	defaultOAuthClientID        = "mock-oauth-client"
 	defaultPlatformClientID     = "mock-platform-client"
 	defaultPlatformClientSecret = "mock-platform-secret"
+	defaultCalendarDispatchURL  = "http://webhook-sink:8090/caldiy/calendar-dispatch"
 	defaultWebhookSubscriberURL = "https://example.invalid/caldiy/webhook"
 	defaultWebhookSigningKeyRef = "fixture-booking-webhook"
 	defaultWebhookSigningSecret = "mock-webhook-signing-secret"
@@ -24,6 +25,7 @@ type Config struct {
 	OAuthClientID        string
 	PlatformClientID     string
 	PlatformClientSecret string
+	CalendarDispatchURL  string
 	WebhookSubscriberURL string
 	WebhookSigningKeyRef string
 	WebhookSigningSecret string
@@ -46,6 +48,7 @@ func FromEnv() Config {
 		OAuthClientID:        env("CALDIY_OAUTH_CLIENT_ID", defaultOAuthClientID),
 		PlatformClientID:     env("CALDIY_PLATFORM_CLIENT_ID", defaultPlatformClientID),
 		PlatformClientSecret: env("CALDIY_PLATFORM_CLIENT_SECRET", defaultPlatformClientSecret),
+		CalendarDispatchURL:  env("CALDIY_CALENDAR_DISPATCH_URL", defaultCalendarDispatchURL),
 		WebhookSubscriberURL: env("CALDIY_WEBHOOK_SUBSCRIBER_URL", defaultWebhookSubscriberURL),
 		WebhookSigningKeyRef: env("CALDIY_WEBHOOK_SIGNING_KEY_REF", defaultWebhookSigningKeyRef),
 		WebhookSigningSecret: env("CALDIY_WEBHOOK_SIGNING_SECRET", defaultWebhookSigningSecret),

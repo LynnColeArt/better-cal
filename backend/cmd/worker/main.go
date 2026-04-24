@@ -52,6 +52,8 @@ func main() {
 		}),
 		booking.NewHTTPWebhookTransport(nil),
 		booking.WithWebhookMaxAttempts(cfg.WebhookMaxAttempts),
+		booking.WithCalendarTransport(booking.NewHTTPCalendarTransport(nil)),
+		booking.WithCalendarDispatchURL(cfg.CalendarDispatchURL),
 	)
 	worker := booking.NewSideEffectWorker(repository, dispatcher)
 	result, err := worker.RunOnce(ctx, 25)

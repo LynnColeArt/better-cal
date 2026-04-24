@@ -182,6 +182,7 @@ func TestFixtureSideEffectPortPersistsWebhookPayloadHints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertPayloadValue(t, rescheduled[0].Payload, "rescheduleUid", PrimaryFixtureUID)
 	assertPayloadValue(t, rescheduled[2].Payload, "rescheduleUid", PrimaryFixtureUID)
 	assertPayloadValue(t, rescheduled[2].Payload, "reschedulingReason", "Fixture reschedule")
 

@@ -585,6 +585,220 @@ func TestPostgresSideEffectDispatcherRecordsDeliveryOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresSideEffectDispatcherRecordsCalendarDispatchOnce(t *testing.T) {
+	pool := testPostgresRepositoryPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	uid := fmt.Sprintf("repo-calendar-dispatch-%d", time.Now().UnixNano())
+	rescheduleUID := "old-booking-" + uid
+	var requestCount atomic.Int32
+	var capturedBody atomic.Value
+	var capturedAction atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		bodyRaw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read error", http.StatusInternalServerError)
+			return
+		}
+		capturedBody.Store(string(bodyRaw))
+		capturedAction.Store(r.Header.Get("X-Cal-Calendar-Action"))
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	targetURL := server.URL + "/caldiy/calendar-dispatch"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from bookings where uid = $1`, uid)
+		_, _ = pool.Exec(cleanupCtx, `delete from booking_fixtures where uid = $1`, uid)
+	})
+
+	bookingValue := repositoryTestBooking(uid, "calendar-dispatch-request")
+	bookingValue.UpdatedAt = "2026-01-01T00:06:00.000Z"
+	if err := repo.Save(ctx, []PlannedSideEffect{
+		{
+			Name:       SideEffectCalendarRescheduled,
+			BookingUID: uid,
+			RequestID:  "calendar-dispatch-request",
+			Payload: map[string]any{
+				"rescheduleUid": rescheduleUID,
+			},
+		},
+	}, bookingValue); err != nil {
+		t.Fatal(err)
+	}
+
+	var sideEffectID int64
+	if err := pool.QueryRow(ctx, `
+		select id
+		from booking_planned_side_effects
+		where booking_uid = $1
+	`, uid).Scan(&sideEffectID); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher := NewPostgresSideEffectDispatcher(
+		pool,
+		repo,
+		nil,
+		nil,
+		nil,
+		WithCalendarTransport(NewHTTPCalendarTransport(server.Client())),
+		WithCalendarDispatchURL(targetURL),
+	)
+	record := PlannedSideEffectRecord{
+		ID:         sideEffectID,
+		Name:       SideEffectCalendarRescheduled,
+		BookingUID: uid,
+		RequestID:  "calendar-dispatch-request",
+		Payload: map[string]any{
+			"rescheduleUid": rescheduleUID,
+		},
+	}
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatcher.Dispatch(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if got := requestCount.Load(); got != 1 {
+		t.Fatalf("calendar requests = %d, want 1", got)
+	}
+
+	var dispatchRows int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from booking_side_effect_dispatch_log
+		where side_effect_id = $1
+			and booking_uid = $2
+			and name = $3
+			and request_id = $4
+	`, sideEffectID, uid, string(SideEffectCalendarRescheduled), "calendar-dispatch-request").Scan(&dispatchRows); err != nil {
+		t.Fatal(err)
+	}
+	if dispatchRows != 1 {
+		t.Fatalf("dispatch rows = %d, want 1", dispatchRows)
+	}
+
+	var action string
+	var contentType string
+	var createdAtWire string
+	var bodyRaw []byte
+	if err := pool.QueryRow(ctx, `
+		select action, content_type, created_at_wire, body
+		from booking_calendar_dispatches
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&action, &contentType, &createdAtWire, &bodyRaw); err != nil {
+		t.Fatal(err)
+	}
+	if action != string(CalendarDispatchBookingRescheduled) {
+		t.Fatalf("action = %q", action)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content type = %q", contentType)
+	}
+	if createdAtWire != bookingValue.UpdatedAt {
+		t.Fatalf("created_at_wire = %q, want %q", createdAtWire, bookingValue.UpdatedAt)
+	}
+
+	var envelope CalendarDispatchEnvelope
+	if err := json.Unmarshal(bodyRaw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Action != CalendarDispatchBookingRescheduled {
+		t.Fatalf("envelope action = %q", envelope.Action)
+	}
+	if envelope.Payload.UID != uid {
+		t.Fatalf("envelope payload uid = %q", envelope.Payload.UID)
+	}
+	if envelope.Payload.RescheduleUID != rescheduleUID {
+		t.Fatalf("envelope payload reschedule uid = %q", envelope.Payload.RescheduleUID)
+	}
+	if envelope.Payload.RequestID != "calendar-dispatch-request" {
+		t.Fatalf("envelope payload request id = %q", envelope.Payload.RequestID)
+	}
+
+	var rawBody map[string]any
+	if err := json.Unmarshal(bodyRaw, &rawBody); err != nil {
+		t.Fatal(err)
+	}
+	payloadValue, _ := rawBody["payload"].(map[string]any)
+	if _, ok := payloadValue["attendees"]; ok {
+		t.Fatal("calendar dispatch exposed attendees")
+	}
+	if _, ok := payloadValue["responses"]; ok {
+		t.Fatal("calendar dispatch exposed responses")
+	}
+	if _, ok := payloadValue["metadata"]; ok {
+		t.Fatal("calendar dispatch exposed metadata")
+	}
+
+	var attemptRows int
+	var attemptTargetURL string
+	var attemptAction string
+	var attemptContentType string
+	var attemptBody string
+	var attemptResponseStatus int
+	var attemptCount int
+	var delivered bool
+	var attemptLastError string
+	if err := pool.QueryRow(ctx, `
+		select count(*), min(target_url), min(action), min(content_type), min(body), min(coalesce(response_status, 0)), min(attempt_count), bool_and(delivered_at is not null), min(coalesce(last_error, ''))
+		from booking_calendar_dispatch_attempts
+		where side_effect_id = $1
+	`, sideEffectID).Scan(&attemptRows, &attemptTargetURL, &attemptAction, &attemptContentType, &attemptBody, &attemptResponseStatus, &attemptCount, &delivered, &attemptLastError); err != nil {
+		t.Fatal(err)
+	}
+	if attemptRows != 1 {
+		t.Fatalf("attempt rows = %d, want 1", attemptRows)
+	}
+	if attemptTargetURL != targetURL {
+		t.Fatalf("attempt target url = %q", attemptTargetURL)
+	}
+	if attemptAction != string(CalendarDispatchBookingRescheduled) {
+		t.Fatalf("attempt action = %q", attemptAction)
+	}
+	if attemptContentType != "application/json" {
+		t.Fatalf("attempt content type = %q", attemptContentType)
+	}
+	if attemptResponseStatus != http.StatusAccepted {
+		t.Fatalf("attempt response status = %d", attemptResponseStatus)
+	}
+	if attemptCount != 1 {
+		t.Fatalf("attempt count = %d, want 1", attemptCount)
+	}
+	if !delivered {
+		t.Fatal("expected delivered calendar dispatch attempt")
+	}
+	if attemptLastError != "" {
+		t.Fatalf("attempt last_error = %q", attemptLastError)
+	}
+
+	var attemptEnvelope CalendarDispatchEnvelope
+	if err := json.Unmarshal([]byte(attemptBody), &attemptEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if attemptEnvelope.Action != envelope.Action {
+		t.Fatalf("attempt action = %q", attemptEnvelope.Action)
+	}
+	if attemptEnvelope.Payload.UID != envelope.Payload.UID {
+		t.Fatalf("attempt payload uid = %q", attemptEnvelope.Payload.UID)
+	}
+	if attemptEnvelope.Payload.RescheduleUID != envelope.Payload.RescheduleUID {
+		t.Fatalf("attempt payload reschedule uid = %q", attemptEnvelope.Payload.RescheduleUID)
+	}
+	if got, _ := capturedBody.Load().(string); got != attemptBody {
+		t.Fatalf("captured calendar body = %q", got)
+	}
+	if got, _ := capturedAction.Load().(string); got != string(CalendarDispatchBookingRescheduled) {
+		t.Fatalf("captured calendar action = %q", got)
+	}
+}
+
 func TestPostgresSideEffectDispatcherRetriesFailedWebhookAttempt(t *testing.T) {
 	pool := testPostgresRepositoryPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
