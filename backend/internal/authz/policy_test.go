@@ -141,6 +141,7 @@ func TestPolicyConstantsExistInContractRegistry(t *testing.T) {
 	for _, policy := range []Policy{
 		PolicyMeRead,
 		PolicyOAuth2Read,
+		PolicyOAuth2TokenExchange,
 		PolicyPlatformClientRead,
 		PolicyBookingRead,
 		PolicyBookingWrite,

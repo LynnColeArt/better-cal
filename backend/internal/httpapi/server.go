@@ -169,6 +169,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/confirm", s.confirmBooking)
 	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/decline", s.declineBooking)
 	s.mux.HandleFunc("GET /v2/auth/oauth2/clients/{clientId}", s.oauthClientMetadata)
+	s.mux.HandleFunc("POST /v2/auth/oauth2/token", s.oauthToken)
 	s.mux.HandleFunc("GET /v2/oauth-clients/{clientId}", s.platformClient)
 }
 

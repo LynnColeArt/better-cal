@@ -142,6 +142,92 @@ func TestOAuthClientReturnsRepositoryErrors(t *testing.T) {
 	}
 }
 
+func TestExchangeOAuthTokenConsumesFixtureAuthorizationCode(t *testing.T) {
+	service := NewService(testConfig())
+	req := OAuthTokenExchangeRequest{
+		GrantType:   "authorization_code",
+		ClientID:    "mock-oauth-client",
+		Code:        FixtureOAuthAuthorizationCode,
+		RedirectURI: "https://fixture.example.test/callback",
+	}
+
+	token, err := service.ExchangeOAuthToken(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.TokenType != "Bearer" {
+		t.Fatalf("token type = %q", token.TokenType)
+	}
+	if token.AccessToken == "" || token.RefreshToken == "" {
+		t.Fatalf("token response = %#v", token)
+	}
+	if token.Scope != "booking:read booking:write" {
+		t.Fatalf("scope = %q", token.Scope)
+	}
+
+	if _, err := service.ExchangeOAuthToken(context.Background(), req); !errors.Is(err, ErrInvalidOAuthGrant) {
+		t.Fatalf("replay err = %v", err)
+	}
+}
+
+func TestExchangeOAuthTokenRejectsInvalidInputs(t *testing.T) {
+	service := NewService(testConfig())
+
+	tests := []struct {
+		name string
+		req  OAuthTokenExchangeRequest
+		err  error
+	}{
+		{
+			name: "missing grant",
+			req: OAuthTokenExchangeRequest{
+				ClientID:    "mock-oauth-client",
+				Code:        FixtureOAuthAuthorizationCode,
+				RedirectURI: "https://fixture.example.test/callback",
+			},
+			err: ErrInvalidOAuthTokenRequest,
+		},
+		{
+			name: "unsupported grant",
+			req: OAuthTokenExchangeRequest{
+				GrantType:   "refresh_token",
+				ClientID:    "mock-oauth-client",
+				Code:        FixtureOAuthAuthorizationCode,
+				RedirectURI: "https://fixture.example.test/callback",
+			},
+			err: ErrUnsupportedOAuthGrantType,
+		},
+		{
+			name: "invalid client",
+			req: OAuthTokenExchangeRequest{
+				GrantType:   "authorization_code",
+				ClientID:    "missing-client",
+				Code:        FixtureOAuthAuthorizationCode,
+				RedirectURI: "https://fixture.example.test/callback",
+			},
+			err: ErrInvalidOAuthClient,
+		},
+		{
+			name: "invalid redirect",
+			req: OAuthTokenExchangeRequest{
+				GrantType:   "authorization_code",
+				ClientID:    "mock-oauth-client",
+				Code:        FixtureOAuthAuthorizationCode,
+				RedirectURI: "https://evil.example.test/callback",
+			},
+			err: ErrInvalidOAuthRedirectURI,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if _, err := service.ExchangeOAuthToken(context.Background(), testCase.req); !errors.Is(err, testCase.err) {
+				t.Fatalf("err = %v, want %v", err, testCase.err)
+			}
+		})
+	}
+}
+
 func TestVerifyPlatformClientRequiresAllCredentials(t *testing.T) {
 	service := NewService(testConfig())
 

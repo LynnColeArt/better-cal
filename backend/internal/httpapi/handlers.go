@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/authz"
@@ -707,6 +709,106 @@ func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 			"updatedAt":    client.UpdatedAt,
 			"requestId":    s.requestID(r),
 		},
+	})
+}
+
+type oauthTokenRequest struct {
+	GrantType   string `json:"grant_type"`
+	ClientID    string `json:"client_id"`
+	Code        string `json:"code"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) {
+	req, ok := decodeOAuthTokenRequest(r)
+	if !ok {
+		s.sendOAuthError(w, r, http.StatusBadRequest, "invalid_request", "Invalid token request")
+		return
+	}
+
+	client, ok, err := s.authenticator().OAuthClientContext(r.Context(), req.ClientID)
+	if err != nil {
+		s.sendOAuthError(w, r, http.StatusInternalServerError, "server_error", "Internal server error")
+		return
+	}
+	if !ok {
+		s.sendOAuthError(w, r, http.StatusUnauthorized, "invalid_client", "Invalid OAuth client")
+		return
+	}
+	if !s.authorize(client.Principal(), authz.PolicyOAuth2TokenExchange) {
+		s.sendOAuthError(w, r, http.StatusUnauthorized, "invalid_client", "Invalid OAuth client")
+		return
+	}
+
+	token, err := s.authenticator().ExchangeOAuthToken(r.Context(), auth.OAuthTokenExchangeRequest{
+		GrantType:   req.GrantType,
+		ClientID:    req.ClientID,
+		Code:        req.Code,
+		RedirectURI: req.RedirectURI,
+	})
+	if err != nil {
+		s.sendOAuthExchangeError(w, r, err)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, map[string]any{
+		"access_token":  token.AccessToken,
+		"token_type":    token.TokenType,
+		"expires_in":    token.ExpiresIn,
+		"refresh_token": token.RefreshToken,
+		"scope":         token.Scope,
+	})
+}
+
+func decodeOAuthTokenRequest(r *http.Request) (oauthTokenRequest, bool) {
+	if r.Body == nil {
+		return oauthTokenRequest{}, false
+	}
+	defer r.Body.Close()
+
+	contentType := strings.ToLower(r.Header.Get("content-type"))
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		if err := r.ParseForm(); err != nil {
+			return oauthTokenRequest{}, false
+		}
+		return oauthTokenRequest{
+			GrantType:   r.PostForm.Get("grant_type"),
+			ClientID:    r.PostForm.Get("client_id"),
+			Code:        r.PostForm.Get("code"),
+			RedirectURI: r.PostForm.Get("redirect_uri"),
+		}, true
+	}
+
+	var req oauthTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return oauthTokenRequest{}, false
+	}
+	return req, true
+}
+
+func (s *Server) sendOAuthExchangeError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, auth.ErrInvalidOAuthTokenRequest):
+		s.sendOAuthError(w, r, http.StatusBadRequest, "invalid_request", "Invalid token request")
+	case errors.Is(err, auth.ErrUnsupportedOAuthGrantType):
+		s.sendOAuthError(w, r, http.StatusBadRequest, "unsupported_grant_type", "Unsupported grant type")
+	case errors.Is(err, auth.ErrInvalidOAuthClient):
+		s.sendOAuthError(w, r, http.StatusUnauthorized, "invalid_client", "Invalid OAuth client")
+	case errors.Is(err, auth.ErrInvalidOAuthRedirectURI),
+		errors.Is(err, auth.ErrInvalidOAuthGrant),
+		errors.Is(err, auth.ErrOAuthGrantConsumed),
+		errors.Is(err, auth.ErrOAuthGrantExpired):
+		s.sendOAuthError(w, r, http.StatusBadRequest, "invalid_grant", "Invalid authorization code")
+	default:
+		s.sendOAuthError(w, r, http.StatusInternalServerError, "server_error", "Internal server error")
+	}
+}
+
+func (s *Server) sendOAuthError(w http.ResponseWriter, r *http.Request, status int, code string, description string) {
+	s.sendJSON(w, r, status, map[string]any{
+		"error":             code,
+		"error_description": description,
+		"requestId":         s.requestID(r),
 	})
 }
 

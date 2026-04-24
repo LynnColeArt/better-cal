@@ -156,6 +156,95 @@ func TestPostgresRepositoryRejectsEmptyOAuthClientID(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositoryExchangesOAuthAuthorizationCodeOnce(t *testing.T) {
+	pool := testPostgresPrincipalPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	clientID := fmt.Sprintf("oauth-token-client-%d", time.Now().UnixNano())
+	codeValue := fmt.Sprintf("oauth-code-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from oauth_tokens where client_id = $1`, clientID)
+		_, _ = pool.Exec(cleanupCtx, `delete from oauth_authorization_codes where client_id = $1`, clientID)
+		_, _ = pool.Exec(cleanupCtx, `delete from oauth_clients where client_id = $1`, clientID)
+	})
+
+	client := FixtureOAuthClient(clientID)
+	if err := repo.SaveOAuthClient(ctx, client); err != nil {
+		t.Fatal(err)
+	}
+	code := FixtureOAuthAuthorizationCodeRecord(FixtureAPIKeyPrincipal(), clientID)
+	code.Code = codeValue
+	if err := repo.SaveOAuthAuthorizationCode(ctx, code); err != nil {
+		t.Fatal(err)
+	}
+
+	token, err := repo.ExchangeOAuthAuthorizationCode(ctx, OAuthTokenExchangeRequest{
+		GrantType:   "authorization_code",
+		ClientID:    clientID,
+		Code:        codeValue,
+		RedirectURI: code.RedirectURI,
+	}, time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.AccessToken == "" || token.RefreshToken == "" {
+		t.Fatalf("token response = %#v", token)
+	}
+	if token.Scope != "booking:read booking:write" {
+		t.Fatalf("scope = %q", token.Scope)
+	}
+
+	if _, err := repo.ExchangeOAuthAuthorizationCode(ctx, OAuthTokenExchangeRequest{
+		GrantType:   "authorization_code",
+		ClientID:    clientID,
+		Code:        codeValue,
+		RedirectURI: code.RedirectURI,
+	}, time.Date(2026, 4, 24, 12, 1, 0, 0, time.UTC)); !errors.Is(err, ErrOAuthGrantConsumed) {
+		t.Fatalf("replay err = %v", err)
+	}
+
+	var rawCodeRows int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from oauth_authorization_codes
+		where to_jsonb(oauth_authorization_codes)::text like '%' || $1 || '%'
+	`, codeValue).Scan(&rawCodeRows); err != nil {
+		t.Fatal(err)
+	}
+	if rawCodeRows != 0 {
+		t.Fatal("raw oauth authorization code was stored")
+	}
+
+	var rawTokenRows int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from oauth_tokens
+		where to_jsonb(oauth_tokens)::text like '%' || $1 || '%'
+			or to_jsonb(oauth_tokens)::text like '%' || $2 || '%'
+	`, token.AccessToken, token.RefreshToken).Scan(&rawTokenRows); err != nil {
+		t.Fatal(err)
+	}
+	if rawTokenRows != 0 {
+		t.Fatal("raw oauth access or refresh token was stored")
+	}
+
+	var consumed bool
+	if err := pool.QueryRow(ctx, `
+		select consumed_at is not null
+		from oauth_authorization_codes
+		where code_sha256 = $1
+	`, sha256Hex(codeValue)).Scan(&consumed); err != nil {
+		t.Fatal(err)
+	}
+	if !consumed {
+		t.Fatal("authorization code was not marked consumed")
+	}
+}
+
 func TestPostgresRepositoryPersistsPlatformClientWithHashedSecret(t *testing.T) {
 	pool := testPostgresPrincipalPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -87,6 +87,7 @@ OAuth lifecycle:
 - authorization code used by wrong client;
 - authorization code used with wrong redirect URI;
 - expired authorization code;
+- the Go OAuth token canary stores authorization codes, access tokens, and refresh tokens only as hashes and returns token values only in the successful exchange response;
 - refresh token replay after rotation where rotation is required;
 - revoked refresh token;
 - confidential client without secret;

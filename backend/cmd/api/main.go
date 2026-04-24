@@ -58,6 +58,11 @@ func main() {
 			slog.Error("oauth client seed failed", "error", err)
 			os.Exit(1)
 		}
+		if err := authRepository.SaveOAuthAuthorizationCode(ctx, auth.FixtureOAuthAuthorizationCodeRecord(auth.FixtureAPIKeyPrincipal(), cfg.OAuthClientID)); err != nil {
+			cancel()
+			slog.Error("oauth authorization code seed failed", "error", err)
+			os.Exit(1)
+		}
 		if err := authRepository.SavePlatformClient(ctx, cfg.PlatformClientSecret, auth.FixturePlatformClient(cfg.PlatformClientID)); err != nil {
 			cancel()
 			slog.Error("platform client seed failed", "error", err)
@@ -100,6 +105,7 @@ func main() {
 				cfg,
 				auth.WithAPIKeyPrincipalRepository(authRepository),
 				auth.WithOAuthClientRepository(authRepository),
+				auth.WithOAuthTokenExchangeRepository(authRepository),
 				auth.WithPlatformClientRepository(authRepository),
 			),
 		))

@@ -1,104 +1,97 @@
 # Current State
 
-Last updated: 2026-04-24, during the provider status refresh slice.
+Last updated: 2026-04-24, during the OAuth authorization-code token exchange slice.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/cal.diy-security-check`
 - Branch: `main`
-- Last pushed commit before this slice: `fb62e581e2 feat: add integration credential metadata canary`
+- Last pushed commit before this slice: `bfe105ae6f feat: refresh integration connection status`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
 
-The working tree now contains the next Phase 6 slice:
+The working tree now contains the next Phase 7 OAuth slice:
 
-- intended commit message: `feat: refresh integration connection status`
-- this session has full local Git and network permissions again, so normal commit and push should work.
+- intended commit message: `feat: add oauth token exchange canary`
+- this session has full local Git and network permissions, so normal commit and push should work.
 
 ## Slice Purpose
 
-The previous credential metadata canary added `GET /v2/credentials` and non-secret rows in `integration_credential_metadata`.
+The previous provider status refresh slice added sanitized status updates for credential metadata and calendar connections.
 
-This slice adds the next non-secret provider boundary: sanitized integration status refresh. Providers can now return generic status facts for existing credential metadata and calendar connections. The stores update only:
+This slice starts the real OAuth token boundary without introducing provider-token storage. It adds an authorization-code exchange canary for the fixture OAuth client:
 
-- operational status;
-- sanitized status code;
-- checked timestamp.
+- `POST /v2/auth/oauth2/token`
+- authorization-code grant only;
+- JSON and form-encoded requests;
+- one-time code consumption;
+- replay denial as `invalid_grant`;
+- authorization codes, access tokens, and refresh tokens stored only as SHA-256 hashes.
 
-The refresh path does not create credentials or calendar connections, does not store provider credential payloads, and does not store raw provider errors or raw provider responses.
+The raw authorization code is seeded as fixture input only, and raw access/refresh token values are returned only in the successful token exchange response.
 
 ## Implemented Changes
 
-Generic provider status contract:
+Auth service:
 
-- [status.go](/home/lynn/projects/cal.diy-security-check/backend/internal/integrations/status.go)
-- Adds `StatusProviderAdapter`.
-- Adds `StatusInput`, `StatusSnapshot`, `CredentialStatus`, and `CalendarConnectionStatus`.
-- This package stays source-neutral and does not contain provider credentials.
+- [service.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service.go)
+- Adds `OAuthAuthorizationCode`, `OAuthTokenExchangeRequest`, and `OAuthTokenResponse`.
+- Adds `FixtureOAuthAuthorizationCode = "mock-oauth-authorization-code"`.
+- Adds `ExchangeOAuthToken` for `authorization_code` requests.
+- Adds fixture in-memory exchange with replay denial.
+- Adds an `OAuthClient.Principal()` view for `policy.oauth2.token.exchange`.
 
-Google fixture provider:
+Postgres auth repository:
 
-- [google_fixture_provider.go](/home/lynn/projects/cal.diy-security-check/backend/internal/calendar/google_fixture_provider.go)
-- `NewGoogleFixtureProvider()` now implements catalog sync, booking calendar dispatch, and generic integration status refresh.
-- For fixture user id `123`, status refresh returns:
-  - credential ref `google-calendar-credential-fixture`
-  - connection ref `google-calendar-connection-fixture`
-  - status `active`
-  - status code `ok`
-
-Credential metadata:
-
-- [store.go](/home/lynn/projects/cal.diy-security-check/backend/internal/credentials/store.go)
-- [postgres_repository.go](/home/lynn/projects/cal.diy-security-check/backend/internal/credentials/postgres_repository.go)
-- Adds `statusCode` and `statusCheckedAt` to credential metadata responses.
-- Adds `RefreshProviderStatus`.
-- Validates provider status updates against existing credential refs, provider names, and account refs.
-- Rejects unknown or duplicate provider status rows instead of creating new credential metadata.
-
-Calendar connections:
-
-- [store.go](/home/lynn/projects/cal.diy-security-check/backend/internal/calendars/store.go)
-- [postgres_repository.go](/home/lynn/projects/cal.diy-security-check/backend/internal/calendars/postgres_repository.go)
-- Adds `statusCode` and `statusCheckedAt` to calendar connection responses.
-- Adds `RefreshProviderConnectionStatus`.
-- Validates provider status updates against existing connection refs, provider names, and account refs.
-- Records a generic `provider_status_refresh` status transition when the operational status changes.
+- [postgres_repository.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/postgres_repository.go)
+- Adds `SaveOAuthAuthorizationCode`.
+- Adds atomic `ExchangeOAuthAuthorizationCode` with `for update`.
+- Marks the authorization code consumed and inserts access/refresh token hashes in the same transaction.
+- Does not store raw authorization codes, access tokens, or refresh tokens.
 
 Migration:
 
-- [0021_integration_status_refresh.sql](/home/lynn/projects/cal.diy-security-check/backend/internal/db/migrations/0021_integration_status_refresh.sql)
-- Adds nullable `status_code` and `status_checked_at` columns to:
-  - `calendar_connections`
-  - `integration_credential_metadata`
+- [0022_oauth_authorization_code_exchange.sql](/home/lynn/projects/cal.diy-security-check/backend/internal/db/migrations/0022_oauth_authorization_code_exchange.sql)
+- Adds `oauth_authorization_codes`.
+- Adds `oauth_tokens`.
+
+HTTP API:
+
+- [server.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server.go)
+- [handlers.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/handlers.go)
+- Adds `POST /v2/auth/oauth2/token`.
+- Enforces `authz.PolicyOAuth2TokenExchange` against the OAuth client principal before exchange.
+- Returns OAuth-style token and error responses, not the normal API envelope.
 
 API startup:
 
 - [main.go](/home/lynn/projects/cal.diy-security-check/backend/cmd/api/main.go)
-- Postgres startup now uses one fixture provider for catalog sync and status refresh.
-- Startup seeds credential metadata, refreshes credential status, syncs calendar catalog, then refreshes calendar connection status.
+- Postgres startup seeds the fixture OAuth authorization code in hashed form.
+- Auth service uses the Postgres OAuth token exchange repository when `CALDIY_DATABASE_URL` is set.
+
+Policy and docs:
+
+- [policy.go](/home/lynn/projects/cal.diy-security-check/backend/internal/authz/policy.go)
+- Adds `PolicyOAuth2TokenExchange`.
+- Updates backend README, scaffold docs, project plan, and security regression notes to describe the token exchange canary and hashed storage rule.
 
 Tests:
 
-- [google_fixture_provider_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/calendar/google_fixture_provider_test.go)
-- [store_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/credentials/store_test.go)
-- [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/credentials/postgres_repository_test.go)
-- [store_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/calendars/store_test.go)
-- [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/calendars/postgres_repository_test.go)
-- Adds fixture provider status coverage.
-- Adds in-memory credential and calendar connection status refresh coverage.
-- Adds invalid provider status snapshot coverage.
-- Adds Postgres status refresh coverage for credential metadata and calendar connection status transitions.
+- [service_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service_test.go)
+- [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/postgres_repository_test.go)
+- [server_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server_test.go)
+- Adds in-memory exchange/replay tests.
+- Adds Postgres one-time exchange tests, including raw code/token non-storage checks.
+- Adds HTTP token exchange shape and replay denial tests.
 
 ## Verification
 
 Checks passed:
 
 ```bash
-cd backend && GOCACHE=/tmp/caldiy-go-build go test ./internal/integrations ./internal/calendar ./internal/calendars ./internal/credentials ./cmd/api
-cd backend && GOCACHE=/tmp/caldiy-go-build go test ./internal/httpapi
 cd backend && GOCACHE=/tmp/caldiy-go-build go test ./...
 node tools/contracts/validate-contracts.mjs
 git diff --check
-cd backend && CALDIY_TEST_DATABASE_URL='postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable' go test ./internal/db ./internal/auth ./internal/authz ./internal/booking ./internal/calendar ./internal/calendars ./internal/credentials ./internal/email ./internal/httpapi ./internal/slots -v
+cd backend && CALDIY_TEST_DATABASE_URL='postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable' GOCACHE=/tmp/caldiy-go-build go test ./internal/db ./internal/auth ./internal/authz ./internal/booking ./internal/calendar ./internal/calendars ./internal/credentials ./internal/email ./internal/httpapi ./internal/slots -v
 docker compose up --build -d
 node tools/backend-smoke/smoke-test.mjs
 node tools/fixture-capture/smoke-test.mjs
@@ -107,15 +100,19 @@ docker compose logs --no-color api postgres webhook-sink > /tmp/better-cal-compo
 node tools/contracts/scan-secrets.mjs --path /tmp/better-cal-compose.log
 ```
 
-The live API and database probe confirmed `statusCode = ok` and non-null `statusCheckedAt` for the fixture credential metadata and calendar connection rows.
+Live API probe:
+
+- First `POST /v2/auth/oauth2/token` with the fixture code returned `200`.
+- Immediate replay of the same body returned `400 invalid_grant`.
+- Postgres probe showed one consumed fixture authorization code and one token row for `mock-oauth-client`.
 
 ## Next Slice Recommendation
 
-After this status refresh slice is committed, the next useful Phase 6 slice is an app metadata/catalog reader:
+After this token exchange slice is committed, the next high-leverage Phase 7 slice is OAuth access-token authentication for one narrow protected path:
 
-1. Add a source-neutral app catalog type with public app metadata only.
-2. Seed fixture app metadata for Google Calendar without credential payloads.
-3. Connect credential metadata rows to public app metadata by app slug.
-4. Keep real OAuth credential encryption/decryption deferred until the non-secret app, credential, calendar, and status boundaries are stable.
+1. Add hashed access-token lookup from `oauth_tokens`.
+2. Convert a stored token row back into a user principal with scoped permissions.
+3. Accept `Authorization: Bearer <access_token>` on one existing low-risk route.
+4. Add expiry and revoked-token denial tests.
 
-Security rule: provider integration state may store opaque refs, public provider metadata, generic scopes, operational status, sanitized status codes, and checked timestamps. It must not store or return raw credential keys, provider tokens, refresh tokens, raw provider responses, raw provider error bodies, or signing material.
+Refresh-token rotation should come after that. The app catalog/app-store surface remains useful, but it can stay behind the OAuth/runtime-auth spine.

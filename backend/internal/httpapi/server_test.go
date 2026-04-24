@@ -320,6 +320,55 @@ func TestCredentialMetadataDoesNotExposeSecrets(t *testing.T) {
 	}
 }
 
+func TestOAuthTokenExchangeConsumesAuthorizationCode(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	body := []byte(`{
+		"grant_type": "authorization_code",
+		"client_id": "mock-oauth-client",
+		"code": "mock-oauth-authorization-code",
+		"redirect_uri": "https://fixture.example.test/callback"
+	}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v2/auth/oauth2/token", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("content-type", "application/json")
+
+	resp, responseBody := do(t, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+	if !bytes.Contains(responseBody, []byte(`"token_type":"Bearer"`)) {
+		t.Fatalf("body did not contain bearer token type: %s", responseBody)
+	}
+	if !bytes.Contains(responseBody, []byte(`"access_token"`)) || !bytes.Contains(responseBody, []byte(`"refresh_token"`)) {
+		t.Fatalf("body did not contain token fields: %s", responseBody)
+	}
+	if bytes.Contains(responseBody, []byte("mock-oauth-authorization-code")) {
+		t.Fatalf("response echoed authorization code: %s", responseBody)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v2/auth/oauth2/token", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("content-type", "application/json")
+
+	resp, responseBody = do(t, req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("replay status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+	if !bytes.Contains(responseBody, []byte(`"error":"invalid_grant"`)) {
+		t.Fatalf("replay body did not contain invalid_grant: %s", responseBody)
+	}
+	if bytes.Contains(responseBody, []byte("mock-oauth-authorization-code")) {
+		t.Fatalf("replay response echoed authorization code: %s", responseBody)
+	}
+}
+
 func TestRequestIDPropagatesToResponse(t *testing.T) {
 	handler := NewServer(testConfig())
 	server := httptest.NewServer(handler)

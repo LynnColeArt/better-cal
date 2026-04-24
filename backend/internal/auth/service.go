@@ -2,9 +2,15 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"errors"
+	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/LynnColeArt/better-cal/backend/internal/config"
 )
@@ -28,6 +34,39 @@ type OAuthClient struct {
 	UpdatedAt    string
 }
 
+func (c OAuthClient) Principal() Principal {
+	return Principal{
+		Type:        "oauth-client",
+		Username:    c.ClientID,
+		Permissions: []string{"oauth-token:exchange"},
+	}
+}
+
+type OAuthAuthorizationCode struct {
+	Code        string
+	ClientID    string
+	RedirectURI string
+	Principal   Principal
+	Scopes      []string
+	ExpiresAt   string
+	CreatedAt   string
+}
+
+type OAuthTokenExchangeRequest struct {
+	GrantType   string
+	ClientID    string
+	Code        string
+	RedirectURI string
+}
+
+type OAuthTokenResponse struct {
+	AccessToken  string
+	RefreshToken string
+	TokenType    string
+	ExpiresIn    int
+	Scope        string
+}
+
 type PlatformClient struct {
 	ID                string
 	Name              string
@@ -46,16 +85,35 @@ func (c PlatformClient) Principal() Principal {
 }
 
 type Service struct {
+	mu                   sync.Mutex
 	apiKey               string
 	oauthClientID        string
 	platformClientID     string
 	platformClientSecret string
 	apiKeyPrincipals     APIKeyPrincipalRepository
 	oauthClients         OAuthClientRepository
+	oauthTokens          OAuthTokenExchangeRepository
 	platformClients      PlatformClientRepository
+	fixtureOAuthCodes    map[string]OAuthAuthorizationCode
 }
 
-const FixtureWrongOwnerAPIKey = "cal_test_wrong_owner_mock"
+const (
+	FixtureWrongOwnerAPIKey       = "cal_test_wrong_owner_mock"
+	FixtureOAuthAuthorizationCode = "mock-oauth-authorization-code"
+	oauthAccessTokenTTL           = time.Hour
+	oauthRefreshTokenTTL          = 30 * 24 * time.Hour
+)
+
+var (
+	ErrInvalidOAuthTokenRequest   = errors.New("invalid oauth token request")
+	ErrUnsupportedOAuthGrantType  = errors.New("unsupported oauth grant type")
+	ErrInvalidOAuthClient         = errors.New("invalid oauth client")
+	ErrInvalidOAuthGrant          = errors.New("invalid oauth grant")
+	ErrOAuthGrantConsumed         = errors.New("oauth grant already consumed")
+	ErrOAuthGrantExpired          = errors.New("oauth grant expired")
+	ErrInvalidOAuthRedirectURI    = errors.New("invalid oauth redirect uri")
+	ErrOAuthTokenGenerationFailed = errors.New("oauth token generation failed")
+)
 
 type ServiceOption func(*Service)
 
@@ -71,6 +129,12 @@ func WithOAuthClientRepository(repo OAuthClientRepository) ServiceOption {
 	}
 }
 
+func WithOAuthTokenExchangeRepository(repo OAuthTokenExchangeRepository) ServiceOption {
+	return func(s *Service) {
+		s.oauthTokens = repo
+	}
+}
+
 func WithPlatformClientRepository(repo PlatformClientRepository) ServiceOption {
 	return func(s *Service) {
 		s.platformClients = repo
@@ -83,6 +147,12 @@ func NewService(cfg config.Config, opts ...ServiceOption) *Service {
 		oauthClientID:        cfg.OAuthClientID,
 		platformClientID:     cfg.PlatformClientID,
 		platformClientSecret: cfg.PlatformClientSecret,
+	}
+	if cfg.OAuthClientID != "" {
+		code := FixtureOAuthAuthorizationCodeRecord(FixtureAPIKeyPrincipal(), cfg.OAuthClientID)
+		service.fixtureOAuthCodes = map[string]OAuthAuthorizationCode{
+			code.Code: code,
+		}
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -178,6 +248,107 @@ func FixtureOAuthClient(clientID string) OAuthClient {
 		CreatedAt:    "2026-01-01T00:00:00.000Z",
 		UpdatedAt:    "2026-01-01T00:00:00.000Z",
 	}
+}
+
+func FixtureOAuthAuthorizationCodeRecord(principal Principal, clientID string) OAuthAuthorizationCode {
+	if clientID == "" {
+		clientID = "mock-oauth-client"
+	}
+	return OAuthAuthorizationCode{
+		Code:        FixtureOAuthAuthorizationCode,
+		ClientID:    clientID,
+		RedirectURI: FixtureOAuthClient(clientID).RedirectURIs[0],
+		Principal:   principal,
+		Scopes:      []string{"booking:read", "booking:write"},
+		ExpiresAt:   "2026-12-31T00:00:00.000Z",
+		CreatedAt:   "2026-01-01T00:00:00.000Z",
+	}
+}
+
+func (s *Service) ExchangeOAuthToken(ctx context.Context, req OAuthTokenExchangeRequest) (OAuthTokenResponse, error) {
+	req.GrantType = strings.TrimSpace(req.GrantType)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	req.Code = strings.TrimSpace(req.Code)
+	req.RedirectURI = strings.TrimSpace(req.RedirectURI)
+
+	if req.GrantType == "" || req.ClientID == "" || req.Code == "" || req.RedirectURI == "" {
+		return OAuthTokenResponse{}, ErrInvalidOAuthTokenRequest
+	}
+	if req.GrantType != "authorization_code" {
+		return OAuthTokenResponse{}, ErrUnsupportedOAuthGrantType
+	}
+	client, ok, err := s.OAuthClientContext(ctx, req.ClientID)
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	if !ok {
+		return OAuthTokenResponse{}, ErrInvalidOAuthClient
+	}
+	if !hasRedirectURI(client.RedirectURIs, req.RedirectURI) {
+		return OAuthTokenResponse{}, ErrInvalidOAuthRedirectURI
+	}
+
+	if s.oauthTokens != nil {
+		return s.oauthTokens.ExchangeOAuthAuthorizationCode(ctx, req, time.Now().UTC())
+	}
+	return s.exchangeFixtureOAuthAuthorizationCode(req, time.Now().UTC())
+}
+
+func (s *Service) exchangeFixtureOAuthAuthorizationCode(req OAuthTokenExchangeRequest, issuedAt time.Time) (OAuthTokenResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	code, ok := s.fixtureOAuthCodes[req.Code]
+	if !ok {
+		return OAuthTokenResponse{}, ErrInvalidOAuthGrant
+	}
+	if code.ClientID != req.ClientID || code.RedirectURI != req.RedirectURI {
+		return OAuthTokenResponse{}, ErrInvalidOAuthGrant
+	}
+	expiresAt, err := parseWireTime(code.ExpiresAt)
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	if !issuedAt.Before(expiresAt) {
+		return OAuthTokenResponse{}, ErrOAuthGrantExpired
+	}
+	delete(s.fixtureOAuthCodes, req.Code)
+	return newOAuthTokenResponse(code.Scopes)
+}
+
+func hasRedirectURI(redirectURIs []string, redirectURI string) bool {
+	for _, candidate := range redirectURIs {
+		if candidate == redirectURI {
+			return true
+		}
+	}
+	return false
+}
+
+func newOAuthTokenResponse(scopes []string) (OAuthTokenResponse, error) {
+	accessToken, err := randomOAuthToken("cal_at")
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	refreshToken, err := randomOAuthToken("cal_rt")
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	return OAuthTokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int(oauthAccessTokenTTL.Seconds()),
+		Scope:        strings.Join(scopes, " "),
+	}, nil
+}
+
+func randomOAuthToken(prefix string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrOAuthTokenGenerationFailed, err)
+	}
+	return prefix + "_" + base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func (s *Service) VerifyPlatformClient(pathClientID string, headerClientID string, secret string) (PlatformClient, bool) {

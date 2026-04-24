@@ -7,6 +7,7 @@ type Policy string
 const (
 	PolicyMeRead                    Policy = "policy.me.read"
 	PolicyOAuth2Read                Policy = "policy.oauth2.client.read"
+	PolicyOAuth2TokenExchange       Policy = "policy.oauth2.token.exchange"
 	PolicyPlatformClientRead        Policy = "policy.platform-client.read"
 	PolicyBookingRead               Policy = "policy.booking.read"
 	PolicyBookingWrite              Policy = "policy.booking.write"
@@ -40,6 +41,7 @@ func NewAuthorizer() *Authorizer {
 		requiredPermissions: map[Policy][]string{
 			PolicyMeRead:                    {"me:read"},
 			PolicyOAuth2Read:                {"oauth-client:read"},
+			PolicyOAuth2TokenExchange:       {"oauth-token:exchange"},
 			PolicyPlatformClientRead:        {"platform-client:read"},
 			PolicyBookingRead:               {"booking:read"},
 			PolicyBookingWrite:              {"booking:write"},
