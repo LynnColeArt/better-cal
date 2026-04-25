@@ -15,6 +15,7 @@ The validator allows future registry modes such as `session`, `platform-access-t
 | `GET /health` | `health` | `policy.public.health` | none | (none) |
 | `GET /v2/me` | `me` | `policy.me.read` | api-key, session, platform-access-token | api-key |
 | `GET /v2/apps` | `readAppCatalog` | `policy.apps.read` | api-key, session, platform-access-token | api-key |
+| `POST /v2/app-install-intents` | `createAppInstallIntent` | `policy.apps.install` | api-key, session, platform-access-token | api-key |
 | `GET /v2/calendar-connections` | `readCalendarConnections` | `policy.calendar-connections.read` | api-key, session, platform-access-token | api-key |
 | `GET /v2/calendars` | `readCalendarCatalog` | `policy.calendars.read` | api-key, session, platform-access-token | api-key |
 | `GET /v2/credentials` | `readCredentialMetadata` | `policy.credentials.read` | api-key, session, platform-access-token | api-key |

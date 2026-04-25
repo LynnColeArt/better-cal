@@ -1,48 +1,48 @@
 # Current State
 
-Last updated: 2026-04-25 04:52 CDT, during the app catalog metadata canary slice.
+Last updated: 2026-04-25 07:07 CDT, during the app install intent slice.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/cal.diy-security-check`
 - Branch: `main`
-- Last pushed commit before this slice: `084957249d chore: add route auth mode coverage report`
+- Last pushed commit before this slice: `95606b60df feat: add app catalog metadata canary`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
 
-The working tree contains the app catalog metadata canary slice:
+The working tree contains the app install intent slice:
 
-- intended commit message: `feat: add app catalog metadata canary`
+- intended commit message: `feat: add app install intent canary`
 - this session has full local Git and network permissions, so normal commit and push should work.
 
 ## Slice Purpose
 
-This slice starts the app store/catalog path without implementing app install flows, real provider onboarding, or credential payload storage.
+This slice adds the first product-visible app install action without implementing real OAuth, credential exchange, app enablement, or provider onboarding.
 
-The implemented boundary is deliberately narrow:
+The boundary is deliberately small:
 
-1. persist a small non-secret app catalog table;
-2. seed fixture app metadata for Google Calendar and Resend;
-3. expose `GET /v2/apps` behind an enforced `apps:read` policy;
-4. keep credential refs, account refs, provider tokens, raw provider responses, provider error bodies, and signing material out of both storage and response tests.
+1. accept a selected app slug through `POST /v2/app-install-intents`;
+2. require `apps:install` through `policy.apps.install`;
+3. validate that the selected app exists in the non-secret app catalog;
+4. persist only user id, selected app slug, an opaque install intent ref, pending status, and timestamps;
+5. return only the intent ref, selected app slug, pending status, timestamps, and request id.
 
 ## Implemented Changes
 
-App catalog:
+App install intent storage:
 
 - [store.go](/home/lynn/projects/cal.diy-security-check/backend/internal/apps/store.go)
 - [postgres_repository.go](/home/lynn/projects/cal.diy-security-check/backend/internal/apps/postgres_repository.go)
-- [0023_integration_app_catalog.sql](/home/lynn/projects/cal.diy-security-check/backend/internal/db/migrations/0023_integration_app_catalog.sql)
-- Adds `integration_app_catalog` with app slug, category, provider, name, description, auth type, capabilities, and timestamps only.
-- Adds fixture catalog rows for `google-calendar` and `resend-email`.
+- [0024_integration_app_install_intents.sql](/home/lynn/projects/cal.diy-security-check/backend/internal/db/migrations/0024_integration_app_install_intents.sql)
+- Adds `integration_app_install_intents` with no credential, token, provider payload, raw response, or signing fields.
+- Keeps the returned `AppInstallIntent` DTO free of internal user ids.
 
 API and policy:
 
 - [server.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server.go)
 - [handlers.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/handlers.go)
-- [main.go](/home/lynn/projects/cal.diy-security-check/backend/cmd/api/main.go)
 - [policy.go](/home/lynn/projects/cal.diy-security-check/backend/internal/authz/policy.go)
-- Adds `GET /v2/apps`, `policy.apps.read`, and fixture principal permission `apps:read`.
-- Seeds app catalog metadata when `CALDIY_DATABASE_URL` is configured.
+- Adds `POST /v2/app-install-intents`, `policy.apps.install`, and fixture principal permission `apps:install`.
+- Unknown app slugs return `404`; missing `apps:install` returns `403`.
 
 Contracts and docs:
 
@@ -50,12 +50,7 @@ Contracts and docs:
 - [policies.json](/home/lynn/projects/cal.diy-security-check/contracts/registries/policies.json)
 - [route-auth-mode-coverage.md](/home/lynn/projects/cal.diy-security-check/contracts/security/route-auth-mode-coverage.md)
 - [security-regression-controls.md](/home/lynn/projects/cal.diy-security-check/docs/spec/security-regression-controls.md)
-- Records the route/policy mapping and the app catalog no-secret invariant.
-
-Test stability:
-
-- [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/booking/postgres_repository_test.go)
-- Tightens planned side-effect claim tests so they temporarily park unrelated claimable rows in a shared Compose test database and restore them during cleanup.
+- Records the route/policy mapping and the no-secret invariant for install intents.
 
 ## Verification
 
@@ -72,16 +67,33 @@ node tools/backend-smoke/smoke-test.mjs
 docker compose --profile tools run --rm contracts
 ```
 
-Live route probe:
+Live route probes:
 
 ```bash
-curl -fsS -H 'Authorization: Bearer cal_test_valid_mock' http://127.0.0.1:8080/v2/apps
+curl -fsS -X POST \
+  -H 'Authorization: Bearer cal_test_valid_mock' \
+  -H 'Content-Type: application/json' \
+  --data '{"appSlug":"google-calendar"}' \
+  http://127.0.0.1:8080/v2/app-install-intents
 ```
 
 Result:
 
-- returned `google-calendar` and `resend-email`;
-- no forbidden app catalog response terms were present: `secret`, `token`, `encrypted`, `refresh`, `access_token`, `refresh_token`, `credentialRef`, `providerPayload`, `rawProvider`, `accountRef`, or `accountLabel`.
+- returned a pending `installIntent` for `google-calendar`;
+- no forbidden response terms were present: `secret`, `token`, `encrypted`, `refresh`, `access_token`, `refresh_token`, `credentialRef`, `providerPayload`, `rawProvider`, `accountRef`, `accountLabel`, `userId`, or `user_id`.
+
+Unknown app probe:
+
+```bash
+curl -sS -o /tmp/app-install-unknown.out -w '%{http_code}' \
+  -X POST \
+  -H 'Authorization: Bearer cal_test_valid_mock' \
+  -H 'Content-Type: application/json' \
+  --data '{"appSlug":"unknown-app"}' \
+  http://127.0.0.1:8080/v2/app-install-intents
+```
+
+Result: `404` with `{"code":"NOT_FOUND","message":"App not found"}`.
 
 Report consistency check:
 
@@ -89,8 +101,8 @@ Report consistency check:
 
 ## Next Slice Recommendation
 
-The next useful product-visible slice is app install intent without secrets:
+The next useful slice is to turn pending install intents into a safe handoff state:
 
-1. add an install-intent DTO for a selected app;
-2. route the intent through policy and validation;
-3. persist only opaque refs and status, leaving provider credentials and token exchange for a later OAuth/install slice.
+1. add a read route for current-user install intents;
+2. add an explicit `requires_external_auth` or `ready_for_credential_exchange` status transition;
+3. keep token exchange, provider credentials, and OAuth callback handling out until the state machine is covered by no-secret tests.

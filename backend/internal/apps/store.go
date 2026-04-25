@@ -2,12 +2,21 @@ package apps
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"sync"
+	"time"
 )
 
 var ErrInvalidAppMetadata = errors.New("invalid app metadata")
+var ErrInvalidInstallIntent = errors.New("invalid app install intent")
+var ErrAppNotFound = errors.New("app not found")
+
+const InstallIntentStatusPending = "pending"
 
 type AppMetadata struct {
 	AppSlug      string   `json:"appSlug"`
@@ -21,16 +30,31 @@ type AppMetadata struct {
 	UpdatedAt    string   `json:"updatedAt"`
 }
 
+type AppInstallIntent struct {
+	InstallIntentRef string `json:"installIntentRef"`
+	UserID           int    `json:"-"`
+	AppSlug          string `json:"appSlug"`
+	Status           string `json:"status"`
+	CreatedAt        string `json:"createdAt"`
+	UpdatedAt        string `json:"updatedAt"`
+}
+
+type CreateInstallIntentRequest struct {
+	AppSlug string `json:"appSlug"`
+}
+
 type Repository interface {
 	ReadAppCatalog(ctx context.Context) ([]AppMetadata, error)
 	SaveAppMetadata(ctx context.Context, app AppMetadata) (AppMetadata, error)
+	SaveInstallIntent(ctx context.Context, intent AppInstallIntent) (AppInstallIntent, error)
 }
 
 type Store struct {
-	mu      sync.Mutex
-	repo    Repository
-	catalog []AppMetadata
-	loaded  bool
+	mu             sync.Mutex
+	repo           Repository
+	catalog        []AppMetadata
+	installIntents map[string]AppInstallIntent
+	loaded         bool
 }
 
 type StoreOption func(*Store)
@@ -42,7 +66,9 @@ func WithRepository(repo Repository) StoreOption {
 }
 
 func NewStore(opts ...StoreOption) *Store {
-	store := &Store{}
+	store := &Store{
+		installIntents: make(map[string]AppInstallIntent),
+	}
 	for _, opt := range opts {
 		opt(store)
 	}
@@ -72,6 +98,36 @@ func (s *Store) ReadAppCatalog(ctx context.Context) ([]AppMetadata, error) {
 	return cloneAppMetadata(s.catalog), nil
 }
 
+func (s *Store) CreateInstallIntent(ctx context.Context, userID int, appSlug string) (AppInstallIntent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if userID <= 0 || strings.TrimSpace(appSlug) == "" {
+		return AppInstallIntent{}, ErrInvalidInstallIntent
+	}
+	if err := s.ensureLoadedLocked(ctx); err != nil {
+		return AppInstallIntent{}, err
+	}
+	if !s.hasAppLocked(appSlug) {
+		return AppInstallIntent{}, ErrAppNotFound
+	}
+
+	now := wireTime(time.Now())
+	intent := AppInstallIntent{
+		InstallIntentRef: newInstallIntentRef(),
+		UserID:           userID,
+		AppSlug:          appSlug,
+		Status:           InstallIntentStatusPending,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if s.repo != nil {
+		return s.repo.SaveInstallIntent(ctx, intent)
+	}
+	s.installIntents[intent.InstallIntentRef] = intent
+	return intent, nil
+}
+
 func (s *Store) ensureLoadedLocked(ctx context.Context) error {
 	if s.loaded {
 		return nil
@@ -99,6 +155,15 @@ func (s *Store) ensureLoadedLocked(ctx context.Context) error {
 	return nil
 }
 
+func (s *Store) hasAppLocked(appSlug string) bool {
+	for _, app := range s.catalog {
+		if app.AppSlug == appSlug {
+			return true
+		}
+	}
+	return false
+}
+
 func ValidateAppMetadata(app AppMetadata) error {
 	if app.AppSlug == "" ||
 		app.Category == "" ||
@@ -107,6 +172,16 @@ func ValidateAppMetadata(app AppMetadata) error {
 		app.Description == "" ||
 		app.AuthType == "" {
 		return ErrInvalidAppMetadata
+	}
+	return nil
+}
+
+func ValidateInstallIntent(intent AppInstallIntent) error {
+	if strings.TrimSpace(intent.InstallIntentRef) == "" ||
+		intent.UserID <= 0 ||
+		strings.TrimSpace(intent.AppSlug) == "" ||
+		intent.Status != InstallIntentStatusPending {
+		return ErrInvalidInstallIntent
 	}
 	return nil
 }
@@ -132,6 +207,18 @@ func sortAppMetadata(items []AppMetadata) {
 			return 0
 		}
 	})
+}
+
+func newInstallIntentRef() string {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return "app-intent-" + hex.EncodeToString(raw[:])
+	}
+	return fmt.Sprintf("app-intent-%d", time.Now().UnixNano())
+}
+
+func wireTime(value time.Time) string {
+	return value.UTC().Format(wireTimeLayout)
 }
 
 func fixtureAppCatalog() []AppMetadata {

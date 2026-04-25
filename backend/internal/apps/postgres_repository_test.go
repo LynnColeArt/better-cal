@@ -62,6 +62,59 @@ func TestPostgresRepositoryRoundTripAppCatalog(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositoryRoundTripInstallIntent(t *testing.T) {
+	pool := testPostgresPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	slug := "app-install-intent-repository-fixture"
+	intentRef := "app-intent-repository-fixture"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from integration_app_install_intents where install_intent_ref = $1`, intentRef)
+		_, _ = pool.Exec(cleanupCtx, `delete from integration_app_catalog where app_slug = $1`, slug)
+	})
+
+	if _, err := repo.SaveAppMetadata(ctx, AppMetadata{
+		AppSlug:      slug,
+		Category:     "calendar",
+		Provider:     "install-intent-provider-fixture",
+		Name:         "Install Intent Fixture",
+		Description:  "Install intent app catalog fixture.",
+		AuthType:     "oauth",
+		Capabilities: []string{"calendar.read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	intent, err := repo.SaveInstallIntent(ctx, AppInstallIntent{
+		InstallIntentRef: intentRef,
+		UserID:           123,
+		AppSlug:          slug,
+		Status:           InstallIntentStatusPending,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent.InstallIntentRef != intentRef {
+		t.Fatalf("install intent ref = %q", intent.InstallIntentRef)
+	}
+	if intent.UserID != 123 {
+		t.Fatalf("user id = %d", intent.UserID)
+	}
+	if intent.AppSlug != slug {
+		t.Fatalf("app slug = %q", intent.AppSlug)
+	}
+	if intent.Status != InstallIntentStatusPending {
+		t.Fatalf("status = %q", intent.Status)
+	}
+	if intent.CreatedAt == "" || intent.UpdatedAt == "" {
+		t.Fatalf("timestamps were not populated: %#v", intent)
+	}
+}
+
 func TestPostgresAppCatalogTableHasNoSecretColumns(t *testing.T) {
 	pool := testPostgresPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -86,6 +139,38 @@ func TestPostgresAppCatalogTableHasNoSecretColumns(t *testing.T) {
 		for _, forbidden := range []string{"secret", "token", "encrypted", "credential", "payload", "raw_response", "error_body"} {
 			if strings.Contains(lowerColumn, forbidden) {
 				t.Fatalf("app catalog table has secret-like column %q", column)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostgresAppInstallIntentTableHasNoSecretColumns(t *testing.T) {
+	pool := testPostgresPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		select column_name
+		from information_schema.columns
+		where table_name = 'integration_app_install_intents'
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatal(err)
+		}
+		lowerColumn := strings.ToLower(column)
+		for _, forbidden := range []string{"secret", "token", "encrypted", "credential", "payload", "raw_response", "error_body"} {
+			if strings.Contains(lowerColumn, forbidden) {
+				t.Fatalf("app install intent table has secret-like column %q", column)
 			}
 		}
 	}

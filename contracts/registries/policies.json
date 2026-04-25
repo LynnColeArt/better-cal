@@ -59,6 +59,28 @@
       ]
     },
     {
+      "id": "policy.apps.install",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "apps:install"
+      ],
+      "resourceResolver": "public-app-catalog-entry",
+      "negativeFixtures": [
+        "unknown-app",
+        "insufficient-permission",
+        "app-install-secret-leak"
+      ]
+    },
+    {
       "id": "policy.oauth2.client.read",
       "status": "draft",
       "authModes": [

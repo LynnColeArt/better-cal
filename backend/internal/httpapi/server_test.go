@@ -22,6 +22,9 @@ func TestStarterAPIContractSlice(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "Bearer invalid", nil, http.StatusUnauthorized)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/me", "cal_test_valid_mock", nil, http.StatusUnauthorized)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/apps", "Bearer cal_test_valid_mock", nil, http.StatusOK)
+	assertStatus(t, server.URL, http.MethodPost, "/v2/app-install-intents", "Bearer cal_test_valid_mock", map[string]any{
+		"appSlug": "google-calendar",
+	}, http.StatusCreated)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/calendar-connections", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/calendars", "Bearer cal_test_valid_mock", nil, http.StatusOK)
 	assertStatus(t, server.URL, http.MethodGet, "/v2/credentials", "Bearer cal_test_valid_mock", nil, http.StatusOK)
@@ -336,6 +339,77 @@ func TestAppCatalogRequiresAppsReadPermission(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	assertStatus(t, server.URL, http.MethodGet, "/v2/apps", "Bearer limited-token", nil, http.StatusForbidden)
+}
+
+func TestAppInstallIntentCreatesNonSecretPendingIntent(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v2/app-install-intents", bytes.NewReader([]byte(`{
+		"appSlug": "google-calendar"
+	}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("authorization", "Bearer cal_test_valid_mock")
+	req.Header.Set("content-type", "application/json")
+
+	resp, body := do(t, req)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	if !bytes.Contains(body, []byte(`"appSlug":"google-calendar"`)) {
+		t.Fatalf("body did not contain install intent app slug: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"status":"pending"`)) {
+		t.Fatalf("body did not contain pending status: %s", body)
+	}
+	if !bytes.Contains(body, []byte(`"installIntentRef":"app-intent-`)) {
+		t.Fatalf("body did not contain opaque install intent ref: %s", body)
+	}
+	for _, forbidden := range [][]byte{
+		[]byte("secret"),
+		[]byte("token"),
+		[]byte("encrypted"),
+		[]byte("refresh"),
+		[]byte("access_token"),
+		[]byte("refresh_token"),
+		[]byte("credentialref"),
+		[]byte("providerpayload"),
+		[]byte("rawprovider"),
+		[]byte("accountref"),
+		[]byte("accountlabel"),
+		[]byte("userid"),
+		[]byte("user_id"),
+	} {
+		if bytes.Contains(bytes.ToLower(body), bytes.ToLower(forbidden)) {
+			t.Fatalf("app install intent response exposed forbidden term %q: %s", forbidden, body)
+		}
+	}
+}
+
+func TestAppInstallIntentRejectsUnknownApp(t *testing.T) {
+	handler := NewServer(testConfig())
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodPost, "/v2/app-install-intents", "Bearer cal_test_valid_mock", map[string]any{
+		"appSlug": "unknown-app",
+	}, http.StatusNotFound)
+}
+
+func TestAppInstallIntentRequiresAppsInstallPermission(t *testing.T) {
+	principal := auth.FixtureAPIKeyPrincipal()
+	principal.Permissions = []string{"apps:read"}
+	service := auth.NewService(testConfig(), auth.WithAPIKeyPrincipalRepository(limitedAPIKeyPrincipals{principal: principal}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodPost, "/v2/app-install-intents", "Bearer limited-token", map[string]any{
+		"appSlug": "google-calendar",
+	}, http.StatusForbidden)
 }
 
 func TestCredentialMetadataDoesNotExposeSecrets(t *testing.T) {

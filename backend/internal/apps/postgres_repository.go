@@ -101,6 +101,38 @@ func (r *PostgresRepository) SaveAppMetadata(ctx context.Context, app AppMetadat
 	return AppMetadata{}, fmt.Errorf("saved app metadata %q was not found", app.AppSlug)
 }
 
+func (r *PostgresRepository) SaveInstallIntent(ctx context.Context, intent AppInstallIntent) (AppInstallIntent, error) {
+	if err := ValidateInstallIntent(intent); err != nil {
+		return AppInstallIntent{}, err
+	}
+
+	var saved AppInstallIntent
+	var createdAt time.Time
+	var updatedAt time.Time
+	if err := r.pool.QueryRow(ctx, `
+		insert into integration_app_install_intents (
+			install_intent_ref,
+			user_id,
+			app_slug,
+			status
+		)
+		values ($1, $2, $3, $4)
+		returning install_intent_ref, user_id, app_slug, status, created_at, updated_at
+	`, intent.InstallIntentRef, intent.UserID, intent.AppSlug, intent.Status).Scan(
+		&saved.InstallIntentRef,
+		&saved.UserID,
+		&saved.AppSlug,
+		&saved.Status,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return AppInstallIntent{}, fmt.Errorf("save app install intent: %w", err)
+	}
+	saved.CreatedAt = formatWireTime(createdAt)
+	saved.UpdatedAt = formatWireTime(updatedAt)
+	return saved, nil
+}
+
 func formatWireTime(value time.Time) string {
 	return value.UTC().Format(wireTimeLayout)
 }

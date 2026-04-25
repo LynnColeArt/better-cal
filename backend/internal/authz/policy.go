@@ -10,6 +10,7 @@ const (
 	PolicyOAuth2TokenExchange       Policy = "policy.oauth2.token.exchange"
 	PolicyPlatformClientRead        Policy = "policy.platform-client.read"
 	PolicyAppsRead                  Policy = "policy.apps.read"
+	PolicyAppsInstall               Policy = "policy.apps.install"
 	PolicyBookingRead               Policy = "policy.booking.read"
 	PolicyBookingWrite              Policy = "policy.booking.write"
 	PolicyBookingHostAction         Policy = "policy.booking.host-action"
@@ -45,6 +46,7 @@ func NewAuthorizer() *Authorizer {
 			PolicyOAuth2TokenExchange:       {"oauth-token:exchange"},
 			PolicyPlatformClientRead:        {"platform-client:read"},
 			PolicyAppsRead:                  {"apps:read"},
+			PolicyAppsInstall:               {"apps:install"},
 			PolicyBookingRead:               {"booking:read"},
 			PolicyBookingWrite:              {"booking:write"},
 			PolicyBookingHostAction:         {"booking:host-action"},

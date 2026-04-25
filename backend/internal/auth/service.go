@@ -212,6 +212,7 @@ func FixtureAPIKeyPrincipal() Principal {
 		Permissions: []string{
 			"me:read",
 			"apps:read",
+			"apps:install",
 			"oauth-client:read",
 			"booking:read",
 			"booking:write",

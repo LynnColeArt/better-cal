@@ -167,6 +167,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.health)
 	s.mux.HandleFunc("GET /v2/me", s.me)
 	s.mux.HandleFunc("GET /v2/apps", s.readAppCatalog)
+	s.mux.HandleFunc("POST /v2/app-install-intents", s.createAppInstallIntent)
 	s.mux.HandleFunc("GET /v2/calendar-connections", s.readCalendarConnections)
 	s.mux.HandleFunc("GET /v2/calendars", s.readCalendarCatalog)
 	s.mux.HandleFunc("GET /v2/credentials", s.readCredentialMetadata)

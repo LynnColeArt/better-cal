@@ -85,6 +85,50 @@ func (s *Server) readAppCatalog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) createAppInstallIntent(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyAppsInstall) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	var body apps.CreateInstallIntentRequest
+	if !decodeJSON(r, &body) {
+		s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body", true)
+		return
+	}
+
+	intent, err := s.apps().CreateInstallIntent(r.Context(), principal.ID, body.AppSlug)
+	if err != nil {
+		if errors.Is(err, apps.ErrInvalidInstallIntent) {
+			s.sendError(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid app install intent", true)
+			return
+		}
+		if errors.Is(err, apps.ErrAppNotFound) {
+			s.sendError(w, r, http.StatusNotFound, "NOT_FOUND", "App not found", true)
+			return
+		}
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusCreated, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"installIntent": intent,
+			"requestId":     s.requestID(r),
+		},
+	})
+}
+
 func (s *Server) readCalendarConnections(w http.ResponseWriter, r *http.Request) {
 	principal, ok, err := s.authenticateAPIKey(r)
 	if err != nil {
