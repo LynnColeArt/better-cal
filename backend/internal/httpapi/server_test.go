@@ -465,6 +465,94 @@ func TestOAuthAccessTokenRequiresBookingReadScope(t *testing.T) {
 	assertStatus(t, server.URL, http.MethodGet, "/v2/bookings/mock-booking-personal-basic", "Bearer write-only-token", nil, http.StatusForbidden)
 }
 
+func TestOAuthAccessTokenAuthorizesBookingWriteRoutes(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   map[string]any
+		status int
+	}{
+		{
+			name:   "create",
+			method: http.MethodPost,
+			path:   "/v2/bookings",
+			body: map[string]any{
+				"eventTypeId": 1001,
+				"start":       "2026-05-01T15:00:00.000Z",
+				"attendee": map[string]any{
+					"name":     "OAuth Attendee",
+					"email":    "oauth-attendee@example.test",
+					"timeZone": "America/Chicago",
+				},
+				"idempotencyKey": "oauth-booking-create-fixture",
+			},
+			status: http.StatusCreated,
+		},
+		{
+			name:   "cancel",
+			method: http.MethodPost,
+			path:   "/v2/bookings/mock-booking-personal-basic/cancel",
+			body: map[string]any{
+				"cancellationReason": "OAuth cancellation",
+			},
+			status: http.StatusOK,
+		},
+		{
+			name:   "reschedule",
+			method: http.MethodPost,
+			path:   "/v2/bookings/mock-booking-personal-basic/reschedule",
+			body: map[string]any{
+				"start": "2026-05-02T15:00:00.000Z",
+			},
+			status: http.StatusOK,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			handler := NewServer(testConfig())
+			server := httptest.NewServer(handler)
+			t.Cleanup(server.Close)
+
+			accessToken := issueOAuthAccessToken(t, server.URL)
+			assertStatus(t, server.URL, testCase.method, testCase.path, "Bearer "+accessToken, testCase.body, testCase.status)
+		})
+	}
+}
+
+func TestOAuthAccessTokenRequiresBookingWriteScope(t *testing.T) {
+	principal := auth.FixtureAPIKeyPrincipal()
+	principal.Permissions = []string{"booking:read"}
+	service := auth.NewService(testConfig(), auth.WithOAuthTokenExchangeRepository(staticOAuthTokens{
+		byToken: map[string]auth.Principal{
+			"read-only-token": principal,
+		},
+	}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/cancel", "Bearer read-only-token", map[string]any{
+		"cancellationReason": "OAuth cancellation",
+	}, http.StatusForbidden)
+}
+
+func TestOAuthAccessTokenBookingWriteDeniesWrongOwner(t *testing.T) {
+	service := auth.NewService(testConfig(), auth.WithOAuthTokenExchangeRepository(staticOAuthTokens{
+		byToken: map[string]auth.Principal{
+			"wrong-owner-token": auth.FixtureWrongOwnerAPIKeyPrincipal(),
+		},
+	}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-personal-basic/cancel", "Bearer wrong-owner-token", map[string]any{
+		"cancellationReason": "OAuth cancellation",
+	}, http.StatusForbidden)
+}
+
 func TestRequestIDPropagatesToResponse(t *testing.T) {
 	handler := NewServer(testConfig())
 	server := httptest.NewServer(handler)
@@ -569,6 +657,35 @@ func do(t *testing.T, req *http.Request) (*http.Response, []byte) {
 		t.Fatal(err)
 	}
 	return resp, body.Bytes()
+}
+
+func issueOAuthAccessToken(t *testing.T, baseURL string) string {
+	t.Helper()
+	body := []byte(`{
+		"grant_type": "authorization_code",
+		"client_id": "mock-oauth-client",
+		"code": "mock-oauth-authorization-code",
+		"redirect_uri": "https://fixture.example.test/callback"
+	}`)
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/v2/auth/oauth2/token", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("content-type", "application/json")
+
+	resp, responseBody := do(t, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("oauth token status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+	var tokenResponse map[string]any
+	if err := json.Unmarshal(responseBody, &tokenResponse); err != nil {
+		t.Fatal(err)
+	}
+	accessToken, _ := tokenResponse["access_token"].(string)
+	if accessToken == "" {
+		t.Fatalf("missing access token in response: %s", responseBody)
+	}
+	return accessToken
 }
 
 type erroringAPIKeyPrincipals struct{}

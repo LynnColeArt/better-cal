@@ -363,7 +363,7 @@ func (s *Server) readSlots(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
-	principal, ok, err := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKeyOrOAuthAccessToken(r)
 	if err != nil {
 		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
 		return
@@ -441,7 +441,7 @@ func (s *Server) readBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
-	principal, ok, err := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKeyOrOAuthAccessToken(r)
 	if err != nil {
 		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
 		return
@@ -498,7 +498,7 @@ func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
-	principal, ok, err := s.authenticateAPIKey(r)
+	principal, ok, err := s.authenticateAPIKeyOrOAuthAccessToken(r)
 	if err != nil {
 		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
 		return

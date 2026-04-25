@@ -1,73 +1,61 @@
 # Current State
 
-Last updated: 2026-04-24, during the OAuth refresh-token rotation slice.
+Last updated: 2026-04-25, during the OAuth booking-write access-token slice.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/cal.diy-security-check`
 - Branch: `main`
-- Last pushed commit before this slice: `39b43d8399 feat: authenticate booking reads with oauth access token`
+- Last pushed commit before this slice: `1eece38d56 feat: rotate oauth refresh tokens`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
 
-The working tree now contains the next Phase 7 OAuth slice:
+The working tree now contains the next Phase 7 OAuth authorization slice:
 
-- intended commit message: `feat: rotate oauth refresh tokens`
+- intended commit message: `feat: authorize booking writes with oauth access tokens`
 - this session has full local Git and network permissions, so normal commit and push should work.
 
 ## Slice Purpose
 
-The previous OAuth slice made issued access tokens usable for `GET /v2/bookings/{bookingUid}` with permissions narrowed to token scopes.
+The previous OAuth slice made refresh-token rotation replay-safe and revoked old access-token rows after rotation.
 
-This slice adds refresh-token rotation to the existing token endpoint:
+This slice extends OAuth access-token authentication from booking read to the first booking write routes:
 
-- `POST /v2/auth/oauth2/token` accepts `grant_type=refresh_token`;
-- refresh tokens are looked up only by SHA-256 hash;
-- the old token row is revoked when rotation succeeds;
-- a new access/refresh token pair is inserted in the same transaction;
-- old refresh-token replay returns `invalid_grant`;
-- old access tokens tied to the revoked row no longer authenticate;
-- expired refresh tokens return `invalid_grant`.
+- `POST /v2/bookings`
+- `POST /v2/bookings/{bookingUid}/cancel`
+- `POST /v2/bookings/{bookingUid}/reschedule`
+
+Scoped OAuth access tokens now pass through the same booking write policy as API keys. They must carry `booking:write`, and the existing booking owner resource check still decides whether the principal can mutate the target booking or event type. Host confirm/decline routes remain on the host-action path and are not changed by this slice.
 
 No provider credential storage, provider refresh tokens, or app-store behavior is introduced in this slice.
 
 ## Implemented Changes
 
-Auth service:
-
-- [service.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service.go)
-- Extends `OAuthTokenExchangeRequest` with `RefreshToken`.
-- Supports both `authorization_code` and `refresh_token` grants.
-- Adds fixture refresh-token rotation for the non-Postgres test path.
-- Deletes the old fixture access token and old refresh token during rotation.
-
-Postgres auth repository:
-
-- [postgres_repository.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/postgres_repository.go)
-- Adds `ExchangeOAuthRefreshToken`.
-- Locks the old refresh-token row with `for update`.
-- Rejects wrong-client, revoked, missing, and expired refresh tokens.
-- Sets `revoked_at` on the old row and inserts the new hashed access/refresh pair in one transaction.
-
 HTTP API:
 
 - [handlers.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/handlers.go)
-- Decodes `refresh_token` in JSON and form-encoded token requests.
-- Passes refresh-token grants through the existing OAuth token endpoint and error mapping.
+- `createBooking`, `cancelBooking`, and `rescheduleBooking` now use `authenticateAPIKeyOrOAuthAccessToken`.
+- OAuth access-token authentication still falls back only after API-key authentication is absent, preserving the existing API-key path.
 
-Contracts and docs:
+Policies:
 
 - [policies.json](/home/lynn/projects/cal.diy-security-check/contracts/registries/policies.json)
-- Adds refresh-token replay and expired-refresh-token negative fixture names to `policy.oauth2.token.exchange`.
-- Updates README, project plan, scaffold docs, and security regression notes.
+- `policy.booking.write` now includes `oauth-access-token` in its allowed auth modes.
+- Required permission and resource resolver remain `booking:write` and `booking-target-event-type`.
 
 Tests:
 
-- [service_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service_test.go)
-- [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/postgres_repository_test.go)
 - [server_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server_test.go)
-- Adds in-memory refresh-token rotation coverage.
-- Adds Postgres rotation coverage for new token issuance, old-row revocation, old access-token denial, replay denial, expired refresh-token denial, and raw token non-storage.
-- Adds HTTP proof that refresh rotation returns a new access token, old access stops authenticating, new access reads the booking, and refresh replay is denied.
+- Adds HTTP proof that an issued OAuth access token can create, cancel, and reschedule bookings.
+- Adds read-only OAuth token denial for a booking write.
+- Adds wrong-owner OAuth token denial for a booking write.
+
+Docs:
+
+- [README.md](/home/lynn/projects/cal.diy-security-check/backend/README.md)
+- [project-plan.md](/home/lynn/projects/cal.diy-security-check/docs/internal/project-plan.md)
+- [implementation-scaffold.md](/home/lynn/projects/cal.diy-security-check/docs/spec/implementation-scaffold.md)
+- [security-regression-controls.md](/home/lynn/projects/cal.diy-security-check/docs/spec/security-regression-controls.md)
+- Updates the Phase 7 and security notes so booking read plus create/cancel/reschedule write routes are described as scoped OAuth access-token canaries.
 
 ## Verification
 
@@ -88,18 +76,17 @@ node tools/contracts/scan-secrets.mjs --path /tmp/better-cal-compose.log
 
 Live API probe:
 
-- First `POST /v2/auth/oauth2/token` with the fixture authorization code returned `200`.
-- `grant_type=refresh_token` with the returned refresh token returned `200`.
-- `GET /v2/bookings/mock-booking-personal-basic` with the old access token returned `401`.
-- The same booking read with the rotated access token returned `200`.
-- Replaying the old refresh token returned `400 invalid_grant`.
-- Replaying the original authorization code still returned `400 invalid_grant`.
+- `POST /v2/auth/oauth2/token` with the fixture authorization code returned `200`.
+- `POST /v2/bookings` with the issued access token and a unique idempotency key returned `201`.
+- `POST /v2/bookings/{newBookingUid}/cancel` with the same access token returned `200`.
+- Replaying the original authorization code returned `400 invalid_grant`.
 
 ## Next Slice Recommendation
 
-After this refresh-token rotation canary is committed, the OAuth runtime loop is coherent enough to either:
+After this booking-write OAuth canary is committed, the safest technical continuation is to close the remaining route gap around host-action authorization:
 
-1. extend OAuth access-token auth from booking read to a small booking write path with scope and resource tests; or
-2. switch back to the app catalog/app-store metadata slice, now that the auth spine is less shaky.
+1. decide whether host confirm/decline should accept OAuth access tokens or stay host-action/API-key only;
+2. if OAuth is allowed, add an explicit `booking:host-action` scope test plus non-host denial;
+3. update the route policy registry and security matrix to keep the auth-mode contract honest.
 
-The safer technical continuation is the first option; the more product-visible continuation is the second.
+The more product-visible alternative is to switch back to the app catalog/app-store metadata slice, but that can wait until the route authorization matrix is less lopsided.

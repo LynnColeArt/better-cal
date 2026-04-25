@@ -24,7 +24,7 @@ Every public route or tRPC procedure must have a manifest entry before implement
 ```json
 {
   "operation": "POST /v2/bookings",
-  "authModes": ["api-key", "platform-access-token", "session"],
+  "authModes": ["api-key", "platform-access-token", "oauth-access-token", "session"],
   "principalTypes": ["user", "platform-client", "managed-user"],
   "requiredPermissions": ["booking:write"],
   "resourceResolver": "booking-target-event-type",
@@ -90,6 +90,7 @@ OAuth lifecycle:
 - the Go OAuth token canary stores authorization codes, access tokens, and refresh tokens only as hashes and returns token values only in the successful exchange response;
 - the Go OAuth access-token canary authenticates booking reads from hashed token rows only when the token is unexpired and unrevoked, and narrows effective permissions to the token scopes;
 - the Go OAuth refresh-token canary rotates refresh tokens by revoking the old hashed token row, inserting a new hashed access/refresh token pair, and denying refresh-token replay;
+- the Go OAuth booking write canary authenticates create, cancel, and reschedule only from unexpired and unrevoked scoped access tokens, requires `booking:write`, and still enforces owner resource checks;
 - refresh token replay after rotation where rotation is required;
 - revoked refresh token;
 - confidential client without secret;
@@ -107,6 +108,7 @@ Booking:
 
 - booking create with unavailable slot;
 - booking create with insufficient permission;
+- booking create/cancel/reschedule with a read-only OAuth access token;
 - booking read/write by a permissioned wrong owner;
 - booking confirm or decline by a permissioned non-host;
 - booking create duplicate idempotency key;
