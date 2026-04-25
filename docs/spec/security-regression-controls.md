@@ -91,6 +91,7 @@ OAuth lifecycle:
 - the Go OAuth access-token canary authenticates booking reads from hashed token rows only when the token is unexpired and unrevoked, and narrows effective permissions to the token scopes;
 - the Go OAuth refresh-token canary rotates refresh tokens by revoking the old hashed token row, inserting a new hashed access/refresh token pair, and denying refresh-token replay;
 - the Go OAuth booking write canary authenticates create, cancel, and reschedule only from unexpired and unrevoked scoped access tokens, requires `booking:write`, and still enforces owner resource checks;
+- the Go OAuth booking host-action canary authenticates confirm and decline only from unexpired and unrevoked scoped access tokens, requires `booking:host-action`, and still enforces host resource checks;
 - refresh token replay after rotation where rotation is required;
 - revoked refresh token;
 - confidential client without secret;
@@ -109,6 +110,7 @@ Booking:
 - booking create with unavailable slot;
 - booking create with insufficient permission;
 - booking create/cancel/reschedule with a read-only OAuth access token;
+- booking confirm/decline with an OAuth access token missing `booking:host-action`;
 - booking read/write by a permissioned wrong owner;
 - booking confirm or decline by a permissioned non-host;
 - booking create duplicate idempotency key;

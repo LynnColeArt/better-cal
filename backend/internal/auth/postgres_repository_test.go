@@ -194,7 +194,7 @@ func TestPostgresRepositoryExchangesOAuthAuthorizationCodeOnce(t *testing.T) {
 	if token.AccessToken == "" || token.RefreshToken == "" {
 		t.Fatalf("token response = %#v", token)
 	}
-	if token.Scope != "booking:read booking:write" {
+	if token.Scope != "booking:read booking:write booking:host-action" {
 		t.Fatalf("scope = %q", token.Scope)
 	}
 	principal, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, token.AccessToken, time.Date(2026, 4, 24, 12, 1, 0, 0, time.UTC))
@@ -207,7 +207,7 @@ func TestPostgresRepositoryExchangesOAuthAuthorizationCodeOnce(t *testing.T) {
 	if principal.ID != FixtureAPIKeyPrincipal().ID || principal.Email != "fixture-user@example.test" {
 		t.Fatalf("principal = %#v", principal)
 	}
-	if len(principal.Permissions) != 2 || principal.Permissions[0] != "booking:read" || principal.Permissions[1] != "booking:write" {
+	if len(principal.Permissions) != 3 || principal.Permissions[0] != "booking:read" || principal.Permissions[1] != "booking:write" || principal.Permissions[2] != "booking:host-action" {
 		t.Fatalf("scoped permissions = %#v", principal.Permissions)
 	}
 	if _, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, token.AccessToken+"-missing", time.Date(2026, 4, 24, 12, 1, 0, 0, time.UTC)); err != nil {
@@ -350,7 +350,7 @@ func TestPostgresRepositoryRotatesOAuthRefreshTokenOnce(t *testing.T) {
 		t.Fatal(err)
 	} else if !ok {
 		t.Fatal("rotated access token did not authenticate")
-	} else if len(principal.Permissions) != 2 || principal.Permissions[0] != "booking:read" || principal.Permissions[1] != "booking:write" {
+	} else if len(principal.Permissions) != 3 || principal.Permissions[0] != "booking:read" || principal.Permissions[1] != "booking:write" || principal.Permissions[2] != "booking:host-action" {
 		t.Fatalf("rotated token permissions = %#v", principal.Permissions)
 	}
 

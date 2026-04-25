@@ -1,53 +1,61 @@
 # Current State
 
-Last updated: 2026-04-25, during the OAuth booking-write access-token slice.
+Last updated: 2026-04-25, during the OAuth booking host-action access-token slice.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/cal.diy-security-check`
 - Branch: `main`
-- Last pushed commit before this slice: `1eece38d56 feat: rotate oauth refresh tokens`
+- Last pushed commit before this slice: `2695a2e0d3 feat: authorize booking writes with oauth access tokens`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
 
 The working tree now contains the next Phase 7 OAuth authorization slice:
 
-- intended commit message: `feat: authorize booking writes with oauth access tokens`
+- intended commit message: `feat: authorize booking host actions with oauth access tokens`
 - this session has full local Git and network permissions, so normal commit and push should work.
 
 ## Slice Purpose
 
-The previous OAuth slice made refresh-token rotation replay-safe and revoked old access-token rows after rotation.
+The previous OAuth slice extended scoped access-token auth from booking reads to create, cancel, and reschedule writes.
 
-This slice extends OAuth access-token authentication from booking read to the first booking write routes:
+This slice closes the remaining starter booking lifecycle route gap by allowing OAuth access tokens on host actions:
 
-- `POST /v2/bookings`
-- `POST /v2/bookings/{bookingUid}/cancel`
-- `POST /v2/bookings/{bookingUid}/reschedule`
+- `POST /v2/bookings/{bookingUid}/confirm`
+- `POST /v2/bookings/{bookingUid}/decline`
 
-Scoped OAuth access tokens now pass through the same booking write policy as API keys. They must carry `booking:write`, and the existing booking owner resource check still decides whether the principal can mutate the target booking or event type. Host confirm/decline routes remain on the host-action path and are not changed by this slice.
+Scoped OAuth access tokens now carry `booking:host-action` from the fixture authorization code. Confirm and decline still use `policy.booking.host-action`; the token must have the host-action scope and the principal must match the booking host resource. A token with only booking read/write scopes fails, and a permissioned non-host still fails.
 
 No provider credential storage, provider refresh tokens, or app-store behavior is introduced in this slice.
 
 ## Implemented Changes
 
+Auth service:
+
+- [service.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service.go)
+- The fixture OAuth authorization code now issues `booking:host-action` alongside `booking:read` and `booking:write`.
+- Refresh-token rotation preserves the same scope set because it rotates from the stored token row scopes.
+
 HTTP API:
 
 - [handlers.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/handlers.go)
-- `createBooking`, `cancelBooking`, and `rescheduleBooking` now use `authenticateAPIKeyOrOAuthAccessToken`.
-- OAuth access-token authentication still falls back only after API-key authentication is absent, preserving the existing API-key path.
+- `confirmBooking` and `declineBooking` now use `authenticateAPIKeyOrOAuthAccessToken`.
+- The existing `policy.booking.host-action` permission and host resource checks remain in place.
 
 Policies:
 
 - [policies.json](/home/lynn/projects/cal.diy-security-check/contracts/registries/policies.json)
-- `policy.booking.write` now includes `oauth-access-token` in its allowed auth modes.
-- Required permission and resource resolver remain `booking:write` and `booking-target-event-type`.
+- `policy.booking.host-action` now includes `oauth-access-token` in its allowed auth modes.
+- Required permission and resource resolver remain `booking:host-action` and `booking-host-or-platform-permission`.
 
 Tests:
 
+- [service_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service_test.go)
+- [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/postgres_repository_test.go)
 - [server_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server_test.go)
-- Adds HTTP proof that an issued OAuth access token can create, cancel, and reschedule bookings.
-- Adds read-only OAuth token denial for a booking write.
-- Adds wrong-owner OAuth token denial for a booking write.
+- Updates OAuth token scope expectations to include `booking:host-action`.
+- Adds HTTP proof that an issued OAuth access token can confirm and decline pending bookings.
+- Adds read/write-only OAuth token denial for a host action.
+- Adds non-host OAuth token denial for a host action.
 
 Docs:
 
@@ -55,7 +63,7 @@ Docs:
 - [project-plan.md](/home/lynn/projects/cal.diy-security-check/docs/internal/project-plan.md)
 - [implementation-scaffold.md](/home/lynn/projects/cal.diy-security-check/docs/spec/implementation-scaffold.md)
 - [security-regression-controls.md](/home/lynn/projects/cal.diy-security-check/docs/spec/security-regression-controls.md)
-- Updates the Phase 7 and security notes so booking read plus create/cancel/reschedule write routes are described as scoped OAuth access-token canaries.
+- Updates the Phase 7 and security notes so booking read/write plus confirm/decline host-action routes are described as scoped OAuth access-token canaries.
 
 ## Verification
 
@@ -77,16 +85,17 @@ node tools/contracts/scan-secrets.mjs --path /tmp/better-cal-compose.log
 Live API probe:
 
 - `POST /v2/auth/oauth2/token` with the fixture authorization code returned `200`.
-- `POST /v2/bookings` with the issued access token and a unique idempotency key returned `201`.
-- `POST /v2/bookings/{newBookingUid}/cancel` with the same access token returned `200`.
+- The token scope included `booking:host-action`.
+- `POST /v2/bookings/mock-booking-pending-confirm/confirm` with the issued access token returned `200`.
+- `POST /v2/bookings/mock-booking-pending-decline/decline` with the same access token returned `200`.
 - Replaying the original authorization code returned `400 invalid_grant`.
 
 ## Next Slice Recommendation
 
-After this booking-write OAuth canary is committed, the safest technical continuation is to close the remaining route gap around host-action authorization:
+After this host-action OAuth canary is committed, the starter booking lifecycle OAuth route matrix is coherent:
 
-1. decide whether host confirm/decline should accept OAuth access tokens or stay host-action/API-key only;
-2. if OAuth is allowed, add an explicit `booking:host-action` scope test plus non-host denial;
-3. update the route policy registry and security matrix to keep the auth-mode contract honest.
+1. booking read uses `booking:read`;
+2. create/cancel/reschedule use `booking:write`;
+3. confirm/decline use `booking:host-action`.
 
-The more product-visible alternative is to switch back to the app catalog/app-store metadata slice, but that can wait until the route authorization matrix is less lopsided.
+The next technical slice should either add a compact route/auth-mode coverage report for the policy registry or switch back to the app catalog/app-store metadata slice for product-visible integration work.

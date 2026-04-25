@@ -161,7 +161,7 @@ func TestExchangeOAuthTokenConsumesFixtureAuthorizationCode(t *testing.T) {
 	if token.AccessToken == "" || token.RefreshToken == "" {
 		t.Fatalf("token response = %#v", token)
 	}
-	if token.Scope != "booking:read booking:write" {
+	if token.Scope != "booking:read booking:write booking:host-action" {
 		t.Fatalf("scope = %q", token.Scope)
 	}
 
@@ -189,7 +189,7 @@ func TestAuthenticateOAuthAccessTokenUsesScopedFixturePermissions(t *testing.T) 
 	if !ok {
 		t.Fatal("expected issued access token to authenticate")
 	}
-	if !hasPrincipalPermission(principal.Permissions, "booking:read") || !hasPrincipalPermission(principal.Permissions, "booking:write") {
+	if !hasPrincipalPermission(principal.Permissions, "booking:read") || !hasPrincipalPermission(principal.Permissions, "booking:write") || !hasPrincipalPermission(principal.Permissions, "booking:host-action") {
 		t.Fatalf("permissions = %#v", principal.Permissions)
 	}
 	if hasPrincipalPermission(principal.Permissions, "me:read") {

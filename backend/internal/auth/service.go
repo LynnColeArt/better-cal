@@ -277,7 +277,7 @@ func FixtureOAuthAuthorizationCodeRecord(principal Principal, clientID string) O
 		ClientID:    clientID,
 		RedirectURI: FixtureOAuthClient(clientID).RedirectURIs[0],
 		Principal:   principal,
-		Scopes:      []string{"booking:read", "booking:write"},
+		Scopes:      []string{"booking:read", "booking:write", "booking:host-action"},
 		ExpiresAt:   "2026-12-31T00:00:00.000Z",
 		CreatedAt:   "2026-01-01T00:00:00.000Z",
 	}

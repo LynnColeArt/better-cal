@@ -553,6 +553,64 @@ func TestOAuthAccessTokenBookingWriteDeniesWrongOwner(t *testing.T) {
 	}, http.StatusForbidden)
 }
 
+func TestOAuthAccessTokenAuthorizesBookingHostActionRoutes(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		body map[string]any
+	}{
+		{
+			name: "confirm",
+			path: "/v2/bookings/mock-booking-pending-confirm/confirm",
+			body: map[string]any{},
+		},
+		{
+			name: "decline",
+			path: "/v2/bookings/mock-booking-pending-decline/decline",
+			body: map[string]any{"reason": "OAuth decline"},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			handler := NewServer(testConfig())
+			server := httptest.NewServer(handler)
+			t.Cleanup(server.Close)
+
+			accessToken := issueOAuthAccessToken(t, server.URL)
+			assertStatus(t, server.URL, http.MethodPost, testCase.path, "Bearer "+accessToken, testCase.body, http.StatusOK)
+		})
+	}
+}
+
+func TestOAuthAccessTokenRequiresBookingHostActionScope(t *testing.T) {
+	principal := auth.FixtureAPIKeyPrincipal()
+	principal.Permissions = []string{"booking:read", "booking:write"}
+	service := auth.NewService(testConfig(), auth.WithOAuthTokenExchangeRepository(staticOAuthTokens{
+		byToken: map[string]auth.Principal{
+			"write-only-token": principal,
+		},
+	}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-pending-confirm/confirm", "Bearer write-only-token", map[string]any{}, http.StatusForbidden)
+}
+
+func TestOAuthAccessTokenBookingHostActionDeniesNonHost(t *testing.T) {
+	service := auth.NewService(testConfig(), auth.WithOAuthTokenExchangeRepository(staticOAuthTokens{
+		byToken: map[string]auth.Principal{
+			"non-host-token": auth.FixtureWrongOwnerAPIKeyPrincipal(),
+		},
+	}))
+	handler := NewServer(testConfig(), WithAuthService(service))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	assertStatus(t, server.URL, http.MethodPost, "/v2/bookings/mock-booking-pending-confirm/confirm", "Bearer non-host-token", map[string]any{}, http.StatusForbidden)
+}
+
 func TestRequestIDPropagatesToResponse(t *testing.T) {
 	handler := NewServer(testConfig())
 	server := httptest.NewServer(handler)
