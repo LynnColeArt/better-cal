@@ -1,63 +1,63 @@
 # Current State
 
-Last updated: 2026-04-24, during the OAuth access-token authentication slice.
+Last updated: 2026-04-24, during the OAuth refresh-token rotation slice.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/cal.diy-security-check`
 - Branch: `main`
-- Last pushed commit before this slice: `d07f9c20c2 feat: add oauth token exchange canary`
+- Last pushed commit before this slice: `39b43d8399 feat: authenticate booking reads with oauth access token`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
 
 The working tree now contains the next Phase 7 OAuth slice:
 
-- intended commit message: `feat: authenticate booking reads with oauth access token`
+- intended commit message: `feat: rotate oauth refresh tokens`
 - this session has full local Git and network permissions, so normal commit and push should work.
 
 ## Slice Purpose
 
-The previous OAuth slice added a fixture authorization-code exchange and persisted only hashed authorization codes plus hashed access/refresh tokens.
+The previous OAuth slice made issued access tokens usable for `GET /v2/bookings/{bookingUid}` with permissions narrowed to token scopes.
 
-This slice makes the issued access token useful for one narrow protected route:
+This slice adds refresh-token rotation to the existing token endpoint:
 
-- `GET /v2/bookings/{bookingUid}` accepts either the existing API key or a valid OAuth access token;
-- access tokens are looked up by SHA-256 hash only;
-- expired or revoked access tokens do not authenticate;
-- effective principal permissions are narrowed to the token scopes before policy checks;
-- insufficient OAuth scope reaches the route as a valid principal and fails authorization with `403`.
+- `POST /v2/auth/oauth2/token` accepts `grant_type=refresh_token`;
+- refresh tokens are looked up only by SHA-256 hash;
+- the old token row is revoked when rotation succeeds;
+- a new access/refresh token pair is inserted in the same transaction;
+- old refresh-token replay returns `invalid_grant`;
+- old access tokens tied to the revoked row no longer authenticate;
+- expired refresh tokens return `invalid_grant`.
 
-Broader booking writes, refresh-token rotation, and multi-route OAuth rollout remain deferred.
+No provider credential storage, provider refresh tokens, or app-store behavior is introduced in this slice.
 
 ## Implemented Changes
 
 Auth service:
 
 - [service.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service.go)
-- Adds `AuthenticateOAuthAccessTokenContext`.
-- Stores issued fixture access tokens in memory only for the non-Postgres test path.
-- Narrows effective token permissions to the intersection of stored principal permissions and OAuth scopes.
+- Extends `OAuthTokenExchangeRequest` with `RefreshToken`.
+- Supports both `authorization_code` and `refresh_token` grants.
+- Adds fixture refresh-token rotation for the non-Postgres test path.
+- Deletes the old fixture access token and old refresh token during rotation.
 
 Postgres auth repository:
 
 - [postgres_repository.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/postgres_repository.go)
-- Adds `ReadOAuthAccessTokenPrincipal`.
-- Reads `oauth_tokens` by `access_token_sha256`.
-- Requires `access_expires_at > now` and `revoked_at is null`.
-- Returns only scope-limited permissions.
+- Adds `ExchangeOAuthRefreshToken`.
+- Locks the old refresh-token row with `for update`.
+- Rejects wrong-client, revoked, missing, and expired refresh tokens.
+- Sets `revoked_at` on the old row and inserts the new hashed access/refresh pair in one transaction.
 
 HTTP API:
 
-- [server.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server.go)
 - [handlers.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/handlers.go)
-- Adds `authenticateAPIKeyOrOAuthAccessToken`.
-- Wires it only into `GET /v2/bookings/{bookingUid}` for this canary.
+- Decodes `refresh_token` in JSON and form-encoded token requests.
+- Passes refresh-token grants through the existing OAuth token endpoint and error mapping.
 
 Contracts and docs:
 
-- [enums.json](/home/lynn/projects/cal.diy-security-check/contracts/registries/enums.json)
 - [policies.json](/home/lynn/projects/cal.diy-security-check/contracts/registries/policies.json)
-- Adds `oauth-access-token` as a draft auth mode.
-- Adds `oauth-access-token` to `policy.booking.read`.
+- Adds refresh-token replay and expired-refresh-token negative fixture names to `policy.oauth2.token.exchange`.
 - Updates README, project plan, scaffold docs, and security regression notes.
 
 Tests:
@@ -65,10 +65,9 @@ Tests:
 - [service_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/service_test.go)
 - [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/auth/postgres_repository_test.go)
 - [server_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server_test.go)
-- Adds fixture access-token authentication coverage.
-- Adds Postgres lookup coverage for valid, missing, expired, and revoked access tokens.
-- Adds HTTP proof that an exchanged token can read a booking.
-- Adds HTTP proof that a valid token without `booking:read` fails with `403`.
+- Adds in-memory refresh-token rotation coverage.
+- Adds Postgres rotation coverage for new token issuance, old-row revocation, old access-token denial, replay denial, expired refresh-token denial, and raw token non-storage.
+- Adds HTTP proof that refresh rotation returns a new access token, old access stops authenticating, new access reads the booking, and refresh replay is denied.
 
 ## Verification
 
@@ -89,18 +88,18 @@ node tools/contracts/scan-secrets.mjs --path /tmp/better-cal-compose.log
 
 Live API probe:
 
-- First `POST /v2/auth/oauth2/token` with the fixture code returned `200`.
-- `GET /v2/bookings/mock-booking-personal-basic` with the returned access token returned `200`.
-- Immediate replay of the same authorization code returned `400 invalid_grant`.
+- First `POST /v2/auth/oauth2/token` with the fixture authorization code returned `200`.
+- `grant_type=refresh_token` with the returned refresh token returned `200`.
+- `GET /v2/bookings/mock-booking-personal-basic` with the old access token returned `401`.
+- The same booking read with the rotated access token returned `200`.
+- Replaying the old refresh token returned `400 invalid_grant`.
+- Replaying the original authorization code still returned `400 invalid_grant`.
 
 ## Next Slice Recommendation
 
-After this access-token canary is committed, the next high-leverage Phase 7 slice is refresh-token rotation:
+After this refresh-token rotation canary is committed, the OAuth runtime loop is coherent enough to either:
 
-1. Add `grant_type=refresh_token`.
-2. Look up refresh tokens by hash.
-3. Rotate refresh tokens atomically.
-4. Revoke or mark the old refresh token as consumed.
-5. Deny refresh-token replay.
+1. extend OAuth access-token auth from booking read to a small booking write path with scope and resource tests; or
+2. switch back to the app catalog/app-store metadata slice, now that the auth spine is less shaky.
 
-The app catalog/app-store surface is still a good Phase 6/7 adjacent slice, but refresh rotation completes the OAuth runtime loop we just opened.
+The safer technical continuation is the first option; the more product-visible continuation is the second.

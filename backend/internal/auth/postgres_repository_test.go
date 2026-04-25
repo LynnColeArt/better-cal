@@ -290,6 +290,119 @@ func TestPostgresRepositoryExchangesOAuthAuthorizationCodeOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositoryRotatesOAuthRefreshTokenOnce(t *testing.T) {
+	pool := testPostgresPrincipalPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	clientID := fmt.Sprintf("oauth-refresh-client-%d", time.Now().UnixNano())
+	codeValue := fmt.Sprintf("oauth-refresh-code-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from oauth_tokens where client_id = $1`, clientID)
+		_, _ = pool.Exec(cleanupCtx, `delete from oauth_authorization_codes where client_id = $1`, clientID)
+		_, _ = pool.Exec(cleanupCtx, `delete from oauth_clients where client_id = $1`, clientID)
+	})
+
+	if err := repo.SaveOAuthClient(ctx, FixtureOAuthClient(clientID)); err != nil {
+		t.Fatal(err)
+	}
+	code := FixtureOAuthAuthorizationCodeRecord(FixtureAPIKeyPrincipal(), clientID)
+	code.Code = codeValue
+	if err := repo.SaveOAuthAuthorizationCode(ctx, code); err != nil {
+		t.Fatal(err)
+	}
+
+	original, err := repo.ExchangeOAuthAuthorizationCode(ctx, OAuthTokenExchangeRequest{
+		GrantType:   "authorization_code",
+		ClientID:    clientID,
+		Code:        codeValue,
+		RedirectURI: code.RedirectURI,
+	}, time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := repo.ExchangeOAuthRefreshToken(ctx, OAuthTokenExchangeRequest{
+		GrantType:    "refresh_token",
+		ClientID:     clientID,
+		RefreshToken: original.RefreshToken,
+	}, time.Date(2026, 4, 24, 12, 5, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.AccessToken == "" || rotated.RefreshToken == "" {
+		t.Fatalf("rotated token response = %#v", rotated)
+	}
+	if rotated.AccessToken == original.AccessToken || rotated.RefreshToken == original.RefreshToken {
+		t.Fatal("refresh rotation reused an old token value")
+	}
+	if rotated.Scope != original.Scope {
+		t.Fatalf("rotated scope = %q, want %q", rotated.Scope, original.Scope)
+	}
+	if _, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, original.AccessToken, time.Date(2026, 4, 24, 12, 6, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("old access token unexpectedly authenticated after refresh rotation")
+	}
+	if principal, ok, err := repo.ReadOAuthAccessTokenPrincipal(ctx, rotated.AccessToken, time.Date(2026, 4, 24, 12, 6, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("rotated access token did not authenticate")
+	} else if len(principal.Permissions) != 2 || principal.Permissions[0] != "booking:read" || principal.Permissions[1] != "booking:write" {
+		t.Fatalf("rotated token permissions = %#v", principal.Permissions)
+	}
+
+	if _, err := repo.ExchangeOAuthRefreshToken(ctx, OAuthTokenExchangeRequest{
+		GrantType:    "refresh_token",
+		ClientID:     clientID,
+		RefreshToken: original.RefreshToken,
+	}, time.Date(2026, 4, 24, 12, 6, 0, 0, time.UTC)); !errors.Is(err, ErrOAuthGrantConsumed) {
+		t.Fatalf("refresh replay err = %v", err)
+	}
+
+	var oldRevoked bool
+	if err := pool.QueryRow(ctx, `
+		select revoked_at is not null
+		from oauth_tokens
+		where refresh_token_sha256 = $1
+	`, sha256Hex(original.RefreshToken)).Scan(&oldRevoked); err != nil {
+		t.Fatal(err)
+	}
+	if !oldRevoked {
+		t.Fatal("old refresh token row was not revoked")
+	}
+
+	var rawTokenRows int
+	if err := pool.QueryRow(ctx, `
+		select count(*)
+		from oauth_tokens
+		where to_jsonb(oauth_tokens)::text like '%' || $1 || '%'
+			or to_jsonb(oauth_tokens)::text like '%' || $2 || '%'
+	`, rotated.AccessToken, rotated.RefreshToken).Scan(&rawTokenRows); err != nil {
+		t.Fatal(err)
+	}
+	if rawTokenRows != 0 {
+		t.Fatal("raw rotated oauth access or refresh token was stored")
+	}
+
+	if _, err := pool.Exec(ctx, `
+		update oauth_tokens
+		set refresh_expires_at = $2
+		where refresh_token_sha256 = $1
+	`, sha256Hex(rotated.RefreshToken), time.Date(2026, 4, 24, 12, 5, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ExchangeOAuthRefreshToken(ctx, OAuthTokenExchangeRequest{
+		GrantType:    "refresh_token",
+		ClientID:     clientID,
+		RefreshToken: rotated.RefreshToken,
+	}, time.Date(2026, 4, 24, 12, 6, 0, 0, time.UTC)); !errors.Is(err, ErrOAuthGrantExpired) {
+		t.Fatalf("expired refresh token err = %v", err)
+	}
+}
+
 func TestPostgresRepositoryPersistsPlatformClientWithHashedSecret(t *testing.T) {
 	pool := testPostgresPrincipalPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

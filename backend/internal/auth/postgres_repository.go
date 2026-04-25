@@ -32,6 +32,7 @@ type OAuthClientRepository interface {
 
 type OAuthTokenExchangeRepository interface {
 	ExchangeOAuthAuthorizationCode(ctx context.Context, req OAuthTokenExchangeRequest, issuedAt time.Time) (OAuthTokenResponse, error)
+	ExchangeOAuthRefreshToken(ctx context.Context, req OAuthTokenExchangeRequest, issuedAt time.Time) (OAuthTokenResponse, error)
 	ReadOAuthAccessTokenPrincipal(ctx context.Context, token string, now time.Time) (Principal, bool, error)
 }
 
@@ -326,6 +327,63 @@ func (r *PostgresRepository) ExchangeOAuthAuthorizationCode(ctx context.Context,
 	return response, nil
 }
 
+func (r *PostgresRepository) ExchangeOAuthRefreshToken(ctx context.Context, req OAuthTokenExchangeRequest, issuedAt time.Time) (OAuthTokenResponse, error) {
+	var response OAuthTokenResponse
+	if err := db.WithTx(ctx, r.pool, func(tx db.Tx) error {
+		record, err := readOAuthRefreshTokenTx(ctx, tx, req.RefreshToken)
+		if err != nil {
+			return err
+		}
+		if record.clientID != req.ClientID {
+			return ErrInvalidOAuthGrant
+		}
+		if record.revokedAt.Valid {
+			return ErrOAuthGrantConsumed
+		}
+		if !issuedAt.Before(record.refreshExpiresAt) {
+			return ErrOAuthGrantExpired
+		}
+
+		token, err := newOAuthTokenResponse(record.scopes)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			update oauth_tokens
+			set revoked_at = $2,
+				updated_at = now()
+			where refresh_token_sha256 = $1
+				and revoked_at is null
+		`, sha256Hex(req.RefreshToken), issuedAt); err != nil {
+			return fmt.Errorf("revoke oauth refresh token: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			insert into oauth_tokens (
+				access_token_sha256,
+				refresh_token_sha256,
+				client_id,
+				user_id,
+				user_uuid,
+				principal_type,
+				username,
+				email,
+				permissions,
+				scopes,
+				access_expires_at,
+				refresh_expires_at
+			)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		`, sha256Hex(token.AccessToken), sha256Hex(token.RefreshToken), record.clientID, record.principal.ID, record.principal.UUID, record.principal.Type, record.principal.Username, record.principal.Email, record.principal.Permissions, record.scopes, issuedAt.Add(oauthAccessTokenTTL), issuedAt.Add(oauthRefreshTokenTTL)); err != nil {
+			return fmt.Errorf("persist rotated oauth token hashes: %w", err)
+		}
+		response = token
+		return nil
+	}); err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	return response, nil
+}
+
 func (r *PostgresRepository) ReadOAuthAccessTokenPrincipal(ctx context.Context, token string, now time.Time) (Principal, bool, error) {
 	if token == "" {
 		return Principal{}, false, nil
@@ -475,6 +533,14 @@ type oauthAuthorizationCodeRecord struct {
 	consumedAt  sql.NullTime
 }
 
+type oauthRefreshTokenRecord struct {
+	clientID         string
+	principal        Principal
+	scopes           []string
+	refreshExpiresAt time.Time
+	revokedAt        sql.NullTime
+}
+
 func readOAuthAuthorizationCodeTx(ctx context.Context, tx db.Tx, code string) (oauthAuthorizationCodeRecord, error) {
 	if code == "" {
 		return oauthAuthorizationCodeRecord{}, ErrInvalidOAuthGrant
@@ -514,6 +580,47 @@ func readOAuthAuthorizationCodeTx(ctx context.Context, tx db.Tx, code string) (o
 	}
 	if err != nil {
 		return oauthAuthorizationCodeRecord{}, fmt.Errorf("read oauth authorization code: %w", err)
+	}
+	return record, nil
+}
+
+func readOAuthRefreshTokenTx(ctx context.Context, tx db.Tx, refreshToken string) (oauthRefreshTokenRecord, error) {
+	if refreshToken == "" {
+		return oauthRefreshTokenRecord{}, ErrInvalidOAuthGrant
+	}
+	var record oauthRefreshTokenRecord
+	err := tx.QueryRow(ctx, `
+		select
+			client_id,
+			user_id,
+			user_uuid,
+			principal_type,
+			username,
+			email,
+			permissions,
+			scopes,
+			refresh_expires_at,
+			revoked_at
+		from oauth_tokens
+		where refresh_token_sha256 = $1
+		for update
+	`, sha256Hex(refreshToken)).Scan(
+		&record.clientID,
+		&record.principal.ID,
+		&record.principal.UUID,
+		&record.principal.Type,
+		&record.principal.Username,
+		&record.principal.Email,
+		&record.principal.Permissions,
+		&record.scopes,
+		&record.refreshExpiresAt,
+		&record.revokedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return oauthRefreshTokenRecord{}, ErrInvalidOAuthGrant
+	}
+	if err != nil {
+		return oauthRefreshTokenRecord{}, fmt.Errorf("read oauth refresh token: %w", err)
 	}
 	return record, nil
 }

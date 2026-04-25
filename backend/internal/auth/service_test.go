@@ -203,6 +203,54 @@ func TestAuthenticateOAuthAccessTokenUsesScopedFixturePermissions(t *testing.T) 
 	}
 }
 
+func TestExchangeOAuthTokenRotatesFixtureRefreshToken(t *testing.T) {
+	service := NewService(testConfig())
+	original, err := service.ExchangeOAuthToken(context.Background(), OAuthTokenExchangeRequest{
+		GrantType:   "authorization_code",
+		ClientID:    "mock-oauth-client",
+		Code:        FixtureOAuthAuthorizationCode,
+		RedirectURI: "https://fixture.example.test/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rotated, err := service.ExchangeOAuthToken(context.Background(), OAuthTokenExchangeRequest{
+		GrantType:    "refresh_token",
+		ClientID:     "mock-oauth-client",
+		RefreshToken: original.RefreshToken,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.AccessToken == "" || rotated.RefreshToken == "" {
+		t.Fatalf("rotated token response = %#v", rotated)
+	}
+	if rotated.AccessToken == original.AccessToken || rotated.RefreshToken == original.RefreshToken {
+		t.Fatalf("refresh rotation reused token values: original=%#v rotated=%#v", original, rotated)
+	}
+	if rotated.Scope != original.Scope {
+		t.Fatalf("rotated scope = %q, want %q", rotated.Scope, original.Scope)
+	}
+	if _, ok, err := service.AuthenticateOAuthAccessTokenContext(context.Background(), "Bearer "+original.AccessToken); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("old access token unexpectedly authenticated after refresh rotation")
+	}
+	if _, ok, err := service.AuthenticateOAuthAccessTokenContext(context.Background(), "Bearer "+rotated.AccessToken); err != nil {
+		t.Fatal(err)
+	} else if !ok {
+		t.Fatal("rotated access token did not authenticate")
+	}
+	if _, err := service.ExchangeOAuthToken(context.Background(), OAuthTokenExchangeRequest{
+		GrantType:    "refresh_token",
+		ClientID:     "mock-oauth-client",
+		RefreshToken: original.RefreshToken,
+	}); !errors.Is(err, ErrInvalidOAuthGrant) {
+		t.Fatalf("refresh replay err = %v", err)
+	}
+}
+
 func TestExchangeOAuthTokenRejectsInvalidInputs(t *testing.T) {
 	service := NewService(testConfig())
 
@@ -223,12 +271,18 @@ func TestExchangeOAuthTokenRejectsInvalidInputs(t *testing.T) {
 		{
 			name: "unsupported grant",
 			req: OAuthTokenExchangeRequest{
-				GrantType:   "refresh_token",
-				ClientID:    "mock-oauth-client",
-				Code:        FixtureOAuthAuthorizationCode,
-				RedirectURI: "https://fixture.example.test/callback",
+				GrantType: "client_credentials",
+				ClientID:  "mock-oauth-client",
 			},
 			err: ErrUnsupportedOAuthGrantType,
+		},
+		{
+			name: "missing refresh token",
+			req: OAuthTokenExchangeRequest{
+				GrantType: "refresh_token",
+				ClientID:  "mock-oauth-client",
+			},
+			err: ErrInvalidOAuthTokenRequest,
 		},
 		{
 			name: "invalid client",

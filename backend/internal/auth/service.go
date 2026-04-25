@@ -53,10 +53,11 @@ type OAuthAuthorizationCode struct {
 }
 
 type OAuthTokenExchangeRequest struct {
-	GrantType   string
-	ClientID    string
-	Code        string
-	RedirectURI string
+	GrantType    string
+	ClientID     string
+	Code         string
+	RedirectURI  string
+	RefreshToken string
 }
 
 type OAuthTokenResponse struct {
@@ -70,6 +71,14 @@ type OAuthTokenResponse struct {
 type OAuthAccessTokenRecord struct {
 	Principal Principal
 	ExpiresAt time.Time
+}
+
+type OAuthRefreshTokenRecord struct {
+	ClientID    string
+	AccessToken string
+	Principal   Principal
+	Scopes      []string
+	ExpiresAt   time.Time
 }
 
 type PlatformClient struct {
@@ -101,6 +110,7 @@ type Service struct {
 	platformClients      PlatformClientRepository
 	fixtureOAuthCodes    map[string]OAuthAuthorizationCode
 	fixtureOAuthTokens   map[string]OAuthAccessTokenRecord
+	fixtureOAuthRefresh  map[string]OAuthRefreshTokenRecord
 }
 
 const (
@@ -160,6 +170,7 @@ func NewService(cfg config.Config, opts ...ServiceOption) *Service {
 			code.Code: code,
 		}
 		service.fixtureOAuthTokens = map[string]OAuthAccessTokenRecord{}
+		service.fixtureOAuthRefresh = map[string]OAuthRefreshTokenRecord{}
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -277,11 +288,12 @@ func (s *Service) ExchangeOAuthToken(ctx context.Context, req OAuthTokenExchange
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	req.Code = strings.TrimSpace(req.Code)
 	req.RedirectURI = strings.TrimSpace(req.RedirectURI)
+	req.RefreshToken = strings.TrimSpace(req.RefreshToken)
 
-	if req.GrantType == "" || req.ClientID == "" || req.Code == "" || req.RedirectURI == "" {
+	if req.GrantType == "" || req.ClientID == "" {
 		return OAuthTokenResponse{}, ErrInvalidOAuthTokenRequest
 	}
-	if req.GrantType != "authorization_code" {
+	if req.GrantType != "authorization_code" && req.GrantType != "refresh_token" {
 		return OAuthTokenResponse{}, ErrUnsupportedOAuthGrantType
 	}
 	client, ok, err := s.OAuthClientContext(ctx, req.ClientID)
@@ -291,14 +303,30 @@ func (s *Service) ExchangeOAuthToken(ctx context.Context, req OAuthTokenExchange
 	if !ok {
 		return OAuthTokenResponse{}, ErrInvalidOAuthClient
 	}
-	if !hasRedirectURI(client.RedirectURIs, req.RedirectURI) {
-		return OAuthTokenResponse{}, ErrInvalidOAuthRedirectURI
-	}
 
-	if s.oauthTokens != nil {
-		return s.oauthTokens.ExchangeOAuthAuthorizationCode(ctx, req, time.Now().UTC())
+	switch req.GrantType {
+	case "authorization_code":
+		if req.Code == "" || req.RedirectURI == "" {
+			return OAuthTokenResponse{}, ErrInvalidOAuthTokenRequest
+		}
+		if !hasRedirectURI(client.RedirectURIs, req.RedirectURI) {
+			return OAuthTokenResponse{}, ErrInvalidOAuthRedirectURI
+		}
+		if s.oauthTokens != nil {
+			return s.oauthTokens.ExchangeOAuthAuthorizationCode(ctx, req, time.Now().UTC())
+		}
+		return s.exchangeFixtureOAuthAuthorizationCode(req, time.Now().UTC())
+	case "refresh_token":
+		if req.RefreshToken == "" {
+			return OAuthTokenResponse{}, ErrInvalidOAuthTokenRequest
+		}
+		if s.oauthTokens != nil {
+			return s.oauthTokens.ExchangeOAuthRefreshToken(ctx, req, time.Now().UTC())
+		}
+		return s.exchangeFixtureOAuthRefreshToken(req, time.Now().UTC())
+	default:
+		return OAuthTokenResponse{}, ErrUnsupportedOAuthGrantType
 	}
-	return s.exchangeFixtureOAuthAuthorizationCode(req, time.Now().UTC())
 }
 
 func (s *Service) AuthenticateOAuthAccessTokenContext(ctx context.Context, authorization string) (Principal, bool, error) {
@@ -342,6 +370,51 @@ func (s *Service) exchangeFixtureOAuthAuthorizationCode(req OAuthTokenExchangeRe
 	s.fixtureOAuthTokens[token.AccessToken] = OAuthAccessTokenRecord{
 		Principal: scopedOAuthPrincipal(code.Principal, code.Scopes),
 		ExpiresAt: issuedAt.Add(oauthAccessTokenTTL),
+	}
+	if s.fixtureOAuthRefresh == nil {
+		s.fixtureOAuthRefresh = map[string]OAuthRefreshTokenRecord{}
+	}
+	s.fixtureOAuthRefresh[token.RefreshToken] = OAuthRefreshTokenRecord{
+		ClientID:    code.ClientID,
+		AccessToken: token.AccessToken,
+		Principal:   code.Principal,
+		Scopes:      append([]string(nil), code.Scopes...),
+		ExpiresAt:   issuedAt.Add(oauthRefreshTokenTTL),
+	}
+	return token, nil
+}
+
+func (s *Service) exchangeFixtureOAuthRefreshToken(req OAuthTokenExchangeRequest, issuedAt time.Time) (OAuthTokenResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.fixtureOAuthRefresh[req.RefreshToken]
+	if !ok {
+		return OAuthTokenResponse{}, ErrInvalidOAuthGrant
+	}
+	if record.ClientID != req.ClientID {
+		return OAuthTokenResponse{}, ErrInvalidOAuthGrant
+	}
+	if !issuedAt.Before(record.ExpiresAt) {
+		return OAuthTokenResponse{}, ErrOAuthGrantExpired
+	}
+	delete(s.fixtureOAuthRefresh, req.RefreshToken)
+	delete(s.fixtureOAuthTokens, record.AccessToken)
+
+	token, err := newOAuthTokenResponse(record.Scopes)
+	if err != nil {
+		return OAuthTokenResponse{}, err
+	}
+	s.fixtureOAuthTokens[token.AccessToken] = OAuthAccessTokenRecord{
+		Principal: scopedOAuthPrincipal(record.Principal, record.Scopes),
+		ExpiresAt: issuedAt.Add(oauthAccessTokenTTL),
+	}
+	s.fixtureOAuthRefresh[token.RefreshToken] = OAuthRefreshTokenRecord{
+		ClientID:    record.ClientID,
+		AccessToken: token.AccessToken,
+		Principal:   record.Principal,
+		Scopes:      append([]string(nil), record.Scopes...),
+		ExpiresAt:   issuedAt.Add(oauthRefreshTokenTTL),
 	}
 	return token, nil
 }

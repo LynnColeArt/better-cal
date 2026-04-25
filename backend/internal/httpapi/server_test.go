@@ -356,8 +356,12 @@ func TestOAuthTokenExchangeConsumesAuthorizationCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	accessToken, _ := tokenResponse["access_token"].(string)
+	refreshToken, _ := tokenResponse["refresh_token"].(string)
 	if accessToken == "" {
 		t.Fatalf("missing access token in response: %s", responseBody)
+	}
+	if refreshToken == "" {
+		t.Fatalf("missing refresh token in response: %s", responseBody)
 	}
 
 	readReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/bookings/mock-booking-personal-basic", nil)
@@ -368,6 +372,64 @@ func TestOAuthTokenExchangeConsumesAuthorizationCode(t *testing.T) {
 	resp, responseBody = do(t, readReq)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("oauth access-token booking read status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+
+	refreshBody := []byte(`{
+		"grant_type": "refresh_token",
+		"client_id": "mock-oauth-client",
+		"refresh_token": "` + refreshToken + `"
+	}`)
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v2/auth/oauth2/token", bytes.NewReader(refreshBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("content-type", "application/json")
+
+	resp, responseBody = do(t, req)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("refresh status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+	var rotatedResponse map[string]any
+	if err := json.Unmarshal(responseBody, &rotatedResponse); err != nil {
+		t.Fatal(err)
+	}
+	rotatedAccessToken, _ := rotatedResponse["access_token"].(string)
+	if rotatedAccessToken == "" || rotatedAccessToken == accessToken {
+		t.Fatalf("invalid rotated access token in response: %s", responseBody)
+	}
+
+	oldReadReq, err := http.NewRequest(http.MethodGet, server.URL+"/v2/bookings/mock-booking-personal-basic", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldReadReq.Header.Set("authorization", "Bearer "+accessToken)
+	resp, responseBody = do(t, oldReadReq)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("old oauth access-token read status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+
+	readReq, err = http.NewRequest(http.MethodGet, server.URL+"/v2/bookings/mock-booking-personal-basic", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readReq.Header.Set("authorization", "Bearer "+rotatedAccessToken)
+	resp, responseBody = do(t, readReq)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rotated oauth access-token booking read status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v2/auth/oauth2/token", bytes.NewReader(refreshBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("content-type", "application/json")
+
+	resp, responseBody = do(t, req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("refresh replay status = %d, body = %s", resp.StatusCode, responseBody)
+	}
+	if !bytes.Contains(responseBody, []byte(`"error":"invalid_grant"`)) {
+		t.Fatalf("refresh replay body did not contain invalid_grant: %s", responseBody)
 	}
 
 	req, err = http.NewRequest(http.MethodPost, server.URL+"/v2/auth/oauth2/token", bytes.NewReader(body))
@@ -534,6 +596,10 @@ type staticOAuthTokens struct {
 
 func (t staticOAuthTokens) ExchangeOAuthAuthorizationCode(context.Context, auth.OAuthTokenExchangeRequest, time.Time) (auth.OAuthTokenResponse, error) {
 	return auth.OAuthTokenResponse{}, errors.New("unused exchange path")
+}
+
+func (t staticOAuthTokens) ExchangeOAuthRefreshToken(context.Context, auth.OAuthTokenExchangeRequest, time.Time) (auth.OAuthTokenResponse, error) {
+	return auth.OAuthTokenResponse{}, errors.New("unused refresh path")
 }
 
 func (t staticOAuthTokens) ReadOAuthAccessTokenPrincipal(_ context.Context, token string, _ time.Time) (auth.Principal, bool, error) {

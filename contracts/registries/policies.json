@@ -106,9 +106,11 @@
       "resourceResolver": "oauth-client-and-authorization-code",
       "negativeFixtures": [
         "api-v2-auth.oauth-code.replay-denied",
+        "api-v2-auth.refresh-token.replay-denied",
         "wrong-client",
         "wrong-redirect-uri",
-        "expired-code"
+        "expired-code",
+        "expired-refresh-token"
       ]
     },
     {

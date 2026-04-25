@@ -713,10 +713,11 @@ func (s *Server) oauthClientMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 type oauthTokenRequest struct {
-	GrantType   string `json:"grant_type"`
-	ClientID    string `json:"client_id"`
-	Code        string `json:"code"`
-	RedirectURI string `json:"redirect_uri"`
+	GrantType    string `json:"grant_type"`
+	ClientID     string `json:"client_id"`
+	Code         string `json:"code"`
+	RedirectURI  string `json:"redirect_uri"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) {
@@ -741,10 +742,11 @@ func (s *Server) oauthToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, err := s.authenticator().ExchangeOAuthToken(r.Context(), auth.OAuthTokenExchangeRequest{
-		GrantType:   req.GrantType,
-		ClientID:    req.ClientID,
-		Code:        req.Code,
-		RedirectURI: req.RedirectURI,
+		GrantType:    req.GrantType,
+		ClientID:     req.ClientID,
+		Code:         req.Code,
+		RedirectURI:  req.RedirectURI,
+		RefreshToken: req.RefreshToken,
 	})
 	if err != nil {
 		s.sendOAuthExchangeError(w, r, err)
@@ -772,10 +774,11 @@ func decodeOAuthTokenRequest(r *http.Request) (oauthTokenRequest, bool) {
 			return oauthTokenRequest{}, false
 		}
 		return oauthTokenRequest{
-			GrantType:   r.PostForm.Get("grant_type"),
-			ClientID:    r.PostForm.Get("client_id"),
-			Code:        r.PostForm.Get("code"),
-			RedirectURI: r.PostForm.Get("redirect_uri"),
+			GrantType:    r.PostForm.Get("grant_type"),
+			ClientID:     r.PostForm.Get("client_id"),
+			Code:         r.PostForm.Get("code"),
+			RedirectURI:  r.PostForm.Get("redirect_uri"),
+			RefreshToken: r.PostForm.Get("refresh_token"),
 		}, true
 	}
 
@@ -798,7 +801,7 @@ func (s *Server) sendOAuthExchangeError(w http.ResponseWriter, r *http.Request, 
 		errors.Is(err, auth.ErrInvalidOAuthGrant),
 		errors.Is(err, auth.ErrOAuthGrantConsumed),
 		errors.Is(err, auth.ErrOAuthGrantExpired):
-		s.sendOAuthError(w, r, http.StatusBadRequest, "invalid_grant", "Invalid authorization code")
+		s.sendOAuthError(w, r, http.StatusBadRequest, "invalid_grant", "Invalid OAuth grant")
 	default:
 		s.sendOAuthError(w, r, http.StatusInternalServerError, "server_error", "Internal server error")
 	}
