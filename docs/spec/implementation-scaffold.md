@@ -148,7 +148,7 @@ Adapters should not:
 Minimum gates before merge:
 
 - Go tests pass.
-- Contract validation passes, including route policy coverage and generated fixture secret scanning.
+- Contract validation passes, including route policy coverage, auth-mode coverage, and generated fixture secret scanning.
 - Fixture replay for touched domains passes.
 - Static analysis passes.
 - Generated contracts are current.

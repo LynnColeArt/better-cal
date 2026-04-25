@@ -85,7 +85,7 @@ Exit criteria:
 
 - auth matrix passes in Go and matches legacy for valid behavior;
 - intentional security breaks have regression tests;
-- route policy coverage and secret scanners pass for implemented routes;
+- route policy/auth-mode coverage and secret scanners pass for implemented routes;
 - no service endpoint relies on email as primary identity; the implemented booking routes now gate fixture resources by immutable principal id, not email.
 
 ## Phase 3: Read-Heavy Domains

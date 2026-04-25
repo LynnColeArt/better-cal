@@ -15,12 +15,13 @@ The current repository root contains source-neutral contracts, internal design n
 ## Quick Checks
 
 ```bash
+node tools/contracts/check-policy-coverage.mjs --report
 node tools/contracts/validate-contracts.mjs
 node tools/fixture-capture/smoke-test.mjs
 node tools/backend-smoke/smoke-test.mjs
 ```
 
-The fixture smoke test captures synthetic API v2 auth and booking fixtures, reviews redaction and schemas, dry-runs approval, and replays the captured fixtures. The backend smoke test replays those same contracts against the starter Go API service.
+The policy coverage report compares implemented backend routes, route policies, and current auth modes. The fixture smoke test captures synthetic API v2 auth and booking fixtures, reviews redaction and schemas, dry-runs approval, and replays the captured fixtures. The backend smoke test replays those same contracts against the starter Go API service.
 
 ## Docker Compose
 

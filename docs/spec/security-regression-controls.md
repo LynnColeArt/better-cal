@@ -166,7 +166,7 @@ Before a domain can ship:
 
 - all accepted security fixtures pass;
 - redaction scanner passes;
-- authorization coverage report shows every route has an enforced policy;
+- authorization coverage report shows every route has an enforced policy and matching currently implemented auth modes;
 - secret scanner passes fixtures and logs from test runs;
 - replay and concurrency tests pass for token and booking writes;
 - rollback plan is tested.
