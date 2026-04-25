@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/apps"
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
@@ -25,6 +26,7 @@ type Server struct {
 	cfg             config.Config
 	authService     *auth.Service
 	authorizer      *authz.Authorizer
+	appStore        *apps.Store
 	bookingStore    *booking.Store
 	calendarStore   *calendars.Store
 	credentialStore *credentials.Store
@@ -34,6 +36,14 @@ type Server struct {
 }
 
 type Option func(*Server)
+
+func WithAppStore(store *apps.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.appStore = store
+		}
+	}
+}
 
 func WithBookingStore(store *booking.Store) Option {
 	return func(s *Server) {
@@ -98,6 +108,9 @@ func NewServerWithLogger(cfg config.Config, logger *slog.Logger, opts ...Option)
 	if server.slotService == nil {
 		server.slotService = slots.NewService()
 	}
+	if server.appStore == nil {
+		server.appStore = apps.NewStore()
+	}
 	if server.calendarStore == nil {
 		server.calendarStore = calendars.NewStore()
 	}
@@ -153,6 +166,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /health", s.health)
 	s.mux.HandleFunc("GET /v2/me", s.me)
+	s.mux.HandleFunc("GET /v2/apps", s.readAppCatalog)
 	s.mux.HandleFunc("GET /v2/calendar-connections", s.readCalendarConnections)
 	s.mux.HandleFunc("GET /v2/calendars", s.readCalendarCatalog)
 	s.mux.HandleFunc("GET /v2/credentials", s.readCredentialMetadata)
@@ -225,6 +239,14 @@ func (s *Server) policies() *authz.Authorizer {
 	}
 	s.authorizer = authz.NewAuthorizer()
 	return s.authorizer
+}
+
+func (s *Server) apps() *apps.Store {
+	if s.appStore != nil {
+		return s.appStore
+	}
+	s.appStore = apps.NewStore()
+	return s.appStore
 }
 
 func (s *Server) bookings() *booking.Store {

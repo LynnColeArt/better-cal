@@ -97,6 +97,21 @@
       ]
     },
     {
+      "id": "api-v2.apps.get",
+      "surface": "api-v2",
+      "method": "GET",
+      "path": "/v2/apps",
+      "versions": [
+        "all-api-v2"
+      ],
+      "status": "draft",
+      "priority": "high",
+      "spec": "docs/spec/compatibility-matrix.md",
+      "policy": "policy.apps.read",
+      "schemaRefs": [],
+      "fixtureRefs": []
+    },
+    {
       "id": "api-v2.platform-client.get",
       "surface": "api-v2",
       "method": "GET",

@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -252,6 +253,7 @@ func TestPostgresRepositoryClaimsAndMarksPlannedSideEffects(t *testing.T) {
 
 	repo := NewPostgresRepository(pool)
 	uid := fmt.Sprintf("repo-side-effect-claim-%d", time.Now().UnixNano())
+	blockClaimableSideEffects(t, ctx, pool)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -350,6 +352,7 @@ func TestPostgresRepositoryClaimLimit(t *testing.T) {
 
 	repo := NewPostgresRepository(pool)
 	uid := fmt.Sprintf("repo-side-effect-limit-%d", time.Now().UnixNano())
+	blockClaimableSideEffects(t, ctx, pool)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
@@ -1642,6 +1645,81 @@ func testPostgresRepositoryPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	return pool
+}
+
+type plannedSideEffectSnapshot struct {
+	ID            int64
+	Status        string
+	Attempts      int
+	LockedAt      sql.NullTime
+	LastError     sql.NullString
+	NextAttemptAt time.Time
+}
+
+func blockClaimableSideEffects(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+		with candidate as (
+			select id, status, attempts, locked_at, last_error, next_attempt_at
+			from booking_planned_side_effects
+			where status in ('planned', 'failed')
+				and next_attempt_at <= now()
+		),
+		blocked as (
+			update booking_planned_side_effects side_effect
+			set status = 'processing',
+				locked_at = now()
+			from candidate
+			where side_effect.id = candidate.id
+			returning candidate.id,
+				candidate.status,
+				candidate.attempts,
+				candidate.locked_at,
+				candidate.last_error,
+				candidate.next_attempt_at
+		)
+		select id, status, attempts, locked_at, last_error, next_attempt_at
+		from blocked
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	snapshots := []plannedSideEffectSnapshot{}
+	for rows.Next() {
+		var snapshot plannedSideEffectSnapshot
+		if err := rows.Scan(
+			&snapshot.ID,
+			&snapshot.Status,
+			&snapshot.Attempts,
+			&snapshot.LockedAt,
+			&snapshot.LastError,
+			&snapshot.NextAttemptAt,
+		); err != nil {
+			t.Fatal(err)
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		for _, snapshot := range snapshots {
+			_, _ = pool.Exec(cleanupCtx, `
+				update booking_planned_side_effects
+				set status = $2,
+					attempts = $3,
+					locked_at = $4,
+					last_error = $5,
+					next_attempt_at = $6
+				where id = $1
+			`, snapshot.ID, snapshot.Status, snapshot.Attempts, snapshot.LockedAt, snapshot.LastError, snapshot.NextAttemptAt)
+		}
+	})
 }
 
 func assertExplicitBookingRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, uid string, expectedStatus string, expectedAttendees int) {

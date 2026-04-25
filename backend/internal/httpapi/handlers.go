@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/apps"
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/authz"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
@@ -45,6 +46,40 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			"email":     principal.Email,
 			"createdAt": principal.CreatedAt,
 			"updatedAt": principal.UpdatedAt,
+			"requestId": s.requestID(r),
+		},
+	})
+}
+
+func (s *Server) readAppCatalog(w http.ResponseWriter, r *http.Request) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil {
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+	if !ok {
+		s.sendError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid credentials", true)
+		return
+	}
+	if !s.authorize(principal, authz.PolicyAppsRead) {
+		s.sendError(w, r, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions", true)
+		return
+	}
+
+	catalog, err := s.apps().ReadAppCatalog(r.Context())
+	if err != nil {
+		if errors.Is(err, apps.ErrInvalidAppMetadata) {
+			s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Invalid app metadata", true)
+			return
+		}
+		s.sendError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+		return
+	}
+
+	s.sendJSON(w, r, http.StatusOK, envelope{
+		Status: "success",
+		Data: map[string]any{
+			"items":     catalog,
 			"requestId": s.requestID(r),
 		},
 	})

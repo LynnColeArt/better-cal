@@ -211,6 +211,7 @@ func FixtureAPIKeyPrincipal() Principal {
 		Email:    "fixture-user@example.test",
 		Permissions: []string{
 			"me:read",
+			"apps:read",
 			"oauth-client:read",
 			"booking:read",
 			"booking:write",

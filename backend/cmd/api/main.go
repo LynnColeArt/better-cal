@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/LynnColeArt/better-cal/backend/internal/apps"
 	"github.com/LynnColeArt/better-cal/backend/internal/auth"
 	"github.com/LynnColeArt/better-cal/backend/internal/booking"
 	calendarprovider "github.com/LynnColeArt/better-cal/backend/internal/calendar"
@@ -68,6 +69,12 @@ func main() {
 			slog.Error("platform client seed failed", "error", err)
 			os.Exit(1)
 		}
+		appRepository := apps.NewPostgresRepository(pool)
+		if err := apps.SeedFixtureCatalog(ctx, appRepository); err != nil {
+			cancel()
+			slog.Error("app catalog seed failed", "error", err)
+			os.Exit(1)
+		}
 		slotRepository := slots.NewPostgresRepository(pool)
 		if err := slots.SeedFixtureAvailability(ctx, slotRepository); err != nil {
 			cancel()
@@ -117,6 +124,9 @@ func main() {
 		))
 		serverOptions = append(serverOptions, httpapi.WithCredentialStore(
 			credentialStore,
+		))
+		serverOptions = append(serverOptions, httpapi.WithAppStore(
+			apps.NewStoreWithRepository(appRepository),
 		))
 		calendarStore := calendars.NewStoreWithRepository(
 			calendars.NewPostgresRepository(pool),

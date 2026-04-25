@@ -38,6 +38,27 @@
       ]
     },
     {
+      "id": "policy.apps.read",
+      "status": "draft",
+      "authModes": [
+        "api-key",
+        "platform-access-token",
+        "session"
+      ],
+      "principalTypes": [
+        "user",
+        "managed-user"
+      ],
+      "requiredPermissions": [
+        "apps:read"
+      ],
+      "resourceResolver": "public-app-catalog",
+      "negativeFixtures": [
+        "insufficient-permission",
+        "app-secret-leak"
+      ]
+    },
+    {
       "id": "policy.oauth2.client.read",
       "status": "draft",
       "authModes": [

@@ -1,72 +1,87 @@
 # Current State
 
-Last updated: 2026-04-25, during the route auth-mode coverage slice.
+Last updated: 2026-04-25 04:52 CDT, during the app catalog metadata canary slice.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/cal.diy-security-check`
 - Branch: `main`
-- Last pushed commit before this slice: `f6fbb28c54 feat: authorize booking host actions with oauth access tokens`
+- Last pushed commit before this slice: `084957249d chore: add route auth mode coverage report`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
 
-The working tree now contains the next security tooling slice:
+The working tree contains the app catalog metadata canary slice:
 
-- intended commit message: `chore: add route auth mode coverage report`
+- intended commit message: `feat: add app catalog metadata canary`
 - this session has full local Git and network permissions, so normal commit and push should work.
 
 ## Slice Purpose
 
-The previous OAuth slices made the starter booking lifecycle OAuth route matrix coherent:
+This slice starts the app store/catalog path without implementing app install flows, real provider onboarding, or credential payload storage.
 
-1. booking read uses `booking:read`;
-2. create/cancel/reschedule use `booking:write`;
-3. confirm/decline use `booking:host-action`.
+The implemented boundary is deliberately narrow:
 
-This slice adds a compact guard so the route policy registry cannot drift away from the implemented handler auth shape.
-
-The validator now checks two directions for currently implemented auth modes:
-
-- handlers cannot implement `api-key`, `oauth-access-token`, `platform-client-secret`, or `oauth-client` unless the route policy lists that mode;
-- policies cannot list one of those currently implemented modes for an implemented route unless the handler actually uses it.
-
-Future registry modes such as `session`, `platform-access-token`, `public-booking-token`, and `public-pkce-client` may still remain listed before their runtime support lands.
+1. persist a small non-secret app catalog table;
+2. seed fixture app metadata for Google Calendar and Resend;
+3. expose `GET /v2/apps` behind an enforced `apps:read` policy;
+4. keep credential refs, account refs, provider tokens, raw provider responses, provider error bodies, and signing material out of both storage and response tests.
 
 ## Implemented Changes
 
-Contract tooling:
+App catalog:
 
-- [check-policy-coverage.mjs](/home/lynn/projects/cal.diy-security-check/tools/contracts/check-policy-coverage.mjs)
-- Infers implemented auth modes from handler calls such as `authenticateAPIKey`, `authenticateAPIKeyOrOAuthAccessToken`, `VerifyPlatformClientContext`, and OAuth token client exchange handling.
-- Keeps the existing route registry and policy constant coverage checks.
-- Adds `--report` output for a compact Markdown route/auth-mode matrix.
+- [store.go](/home/lynn/projects/cal.diy-security-check/backend/internal/apps/store.go)
+- [postgres_repository.go](/home/lynn/projects/cal.diy-security-check/backend/internal/apps/postgres_repository.go)
+- [0023_integration_app_catalog.sql](/home/lynn/projects/cal.diy-security-check/backend/internal/db/migrations/0023_integration_app_catalog.sql)
+- Adds `integration_app_catalog` with app slug, category, provider, name, description, auth type, capabilities, and timestamps only.
+- Adds fixture catalog rows for `google-calendar` and `resend-email`.
 
-Security artifacts:
+API and policy:
 
+- [server.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/server.go)
+- [handlers.go](/home/lynn/projects/cal.diy-security-check/backend/internal/httpapi/handlers.go)
+- [main.go](/home/lynn/projects/cal.diy-security-check/backend/cmd/api/main.go)
+- [policy.go](/home/lynn/projects/cal.diy-security-check/backend/internal/authz/policy.go)
+- Adds `GET /v2/apps`, `policy.apps.read`, and fixture principal permission `apps:read`.
+- Seeds app catalog metadata when `CALDIY_DATABASE_URL` is configured.
+
+Contracts and docs:
+
+- [routes.json](/home/lynn/projects/cal.diy-security-check/contracts/registries/routes.json)
+- [policies.json](/home/lynn/projects/cal.diy-security-check/contracts/registries/policies.json)
 - [route-auth-mode-coverage.md](/home/lynn/projects/cal.diy-security-check/contracts/security/route-auth-mode-coverage.md)
-- Captures the current implemented-route auth-mode matrix.
-- Shows future registry modes separately from currently implemented handler modes.
-
-Docs:
-
-- [README.md](/home/lynn/projects/cal.diy-security-check/README.md)
-- [contracts/security/README.md](/home/lynn/projects/cal.diy-security-check/contracts/security/README.md)
-- [project-plan.md](/home/lynn/projects/cal.diy-security-check/docs/internal/project-plan.md)
-- [implementation-scaffold.md](/home/lynn/projects/cal.diy-security-check/docs/spec/implementation-scaffold.md)
 - [security-regression-controls.md](/home/lynn/projects/cal.diy-security-check/docs/spec/security-regression-controls.md)
-- Updates the quick checks and security gates to include auth-mode coverage, not only policy-name coverage.
+- Records the route/policy mapping and the app catalog no-secret invariant.
+
+Test stability:
+
+- [postgres_repository_test.go](/home/lynn/projects/cal.diy-security-check/backend/internal/booking/postgres_repository_test.go)
+- Tightens planned side-effect claim tests so they temporarily park unrelated claimable rows in a shared Compose test database and restore them during cleanup.
 
 ## Verification
 
 Checks passed:
 
 ```bash
+cd backend && GOCACHE=/tmp/caldiy-go-build go test ./...
 node tools/contracts/check-policy-coverage.mjs
-node tools/contracts/check-policy-coverage.mjs --report
 node tools/contracts/validate-contracts.mjs
 git diff --check
-cd backend && GOCACHE=/tmp/caldiy-go-build go test ./...
+docker compose up --build -d
+cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/caldiy-go-build go test ./internal/db ./internal/apps ./internal/auth ./internal/authz ./internal/booking ./internal/calendar ./internal/calendars ./internal/credentials ./internal/email ./internal/httpapi ./internal/slots -v
+node tools/backend-smoke/smoke-test.mjs
 docker compose --profile tools run --rm contracts
 ```
+
+Live route probe:
+
+```bash
+curl -fsS -H 'Authorization: Bearer cal_test_valid_mock' http://127.0.0.1:8080/v2/apps
+```
+
+Result:
+
+- returned `google-calendar` and `resend-email`;
+- no forbidden app catalog response terms were present: `secret`, `token`, `encrypted`, `refresh`, `access_token`, `refresh_token`, `credentialRef`, `providerPayload`, `rawProvider`, `accountRef`, or `accountLabel`.
 
 Report consistency check:
 
@@ -74,8 +89,8 @@ Report consistency check:
 
 ## Next Slice Recommendation
 
-After this route auth-mode coverage slice is committed, the safest technical continuation is complete enough for now. The next product-visible slice should switch back to the app catalog/app-store metadata path:
+The next useful product-visible slice is app install intent without secrets:
 
-1. define the first non-secret app catalog DTO and registry entries;
-2. add a fixture provider/store canary for installed or available apps;
-3. expose the smallest read route without credential payloads or provider tokens.
+1. add an install-intent DTO for a selected app;
+2. route the intent through policy and validation;
+3. persist only opaque refs and status, leaving provider credentials and token exchange for a later OAuth/install slice.

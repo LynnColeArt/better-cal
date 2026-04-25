@@ -143,6 +143,7 @@ func TestPolicyConstantsExistInContractRegistry(t *testing.T) {
 		PolicyOAuth2Read,
 		PolicyOAuth2TokenExchange,
 		PolicyPlatformClientRead,
+		PolicyAppsRead,
 		PolicyBookingRead,
 		PolicyBookingWrite,
 		PolicyBookingHostAction,
