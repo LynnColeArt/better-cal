@@ -1,0 +1,260 @@
+# Project Plan: Go Backend Drop-In Replacement
+
+This plan assumes the feature inventory in [Feature Inventory](feature-inventory.md), the route map in [Route Inventory](route-inventory.md), the compatibility rules in [Backend Contracts](backend-contracts.md), the persistence notes in [Data Model Contracts](data-model-contracts.md), the source-neutral data rules in [Data Structure Contracts](../spec/data-structure-contracts.md), the migration approach in [Drop-In Compatibility Strategy](drop-in-compatibility-strategy.md), the source-informed issues in [Security Audit Ledger](security-audit-ledger.md), and the source-neutral implementation process in [Whiteroom Protocol](../spec/whiteroom-protocol.md).
+
+## Phase 0: Contract Freeze and Golden Tests
+
+Goal: define what "drop-in" means before writing replacement behavior.
+
+Deliverables:
+
+- frozen route specs for `/api/trpc/*`, `/v2/*`, `/api/v2/*`, and `apps/web/app/api/*`;
+- accepted source-neutral specs for implementation engineers;
+- public schema, enum, identifier, stored JSON, and persistence contract artifacts;
+- golden fixtures for core request/response shapes;
+- DB side-effect assertions for booking, event type, OAuth, credential, webhook, and schedule writes;
+- webhook payload/signature fixtures for every public trigger;
+- auth matrix covering session, API key, platform OAuth client headers, access tokens, and invalid credentials;
+- security regression controls for identity, authorization, secrets, token replay, cron auth, logging, webhooks, and booking writes;
+- list of intentional security contract breaks.
+
+References:
+
+- [Backend Contracts](backend-contracts.md)
+- [Route Inventory](route-inventory.md)
+- [Feature Inventory](feature-inventory.md)
+- [Whiteroom Protocol](../spec/whiteroom-protocol.md)
+- [Data Structure Contracts](../spec/data-structure-contracts.md)
+- [Fixture Harness](../spec/fixture-harness.md)
+- [Security Audit Ledger](security-audit-ledger.md)
+- [Security Regression Controls](../spec/security-regression-controls.md)
+
+Exit criteria:
+
+- every phase-1 endpoint has at least one golden read test;
+- every write endpoint has an expected state transition;
+- implementation engineers have accepted source-neutral specs for the endpoint;
+- data structure contracts exist for public payloads and database-visible writes;
+- every high-risk route has negative security fixtures;
+- security breaks are approved and documented.
+
+## Phase 1: Compatibility Gateway Skeleton
+
+Goal: stand up the Go service and route traffic to it without changing product behavior.
+
+Deliverables:
+
+- Go service skeleton with request id, logging, panic recovery, validation, auth middleware, and health endpoints;
+- PostgreSQL and Redis clients;
+- generated data-access layer for key tables;
+- data contract registry for public schemas, enums, identifiers, stored JSON fields, and secret classifications;
+- OpenAPI skeleton for API v2 compatibility routes;
+- Next.js tRPC bridge proof of concept for one query and one mutation;
+- feature flag or routing switch to choose legacy versus Go per endpoint.
+
+References:
+
+- [Drop-In Compatibility Strategy](drop-in-compatibility-strategy.md)
+- [Backend Contracts](backend-contracts.md)
+
+Exit criteria:
+
+- one read endpoint and one write endpoint can run through Go in shadow mode;
+- legacy and Go responses are diffed automatically.
+
+## Phase 2: Identity, Session, and Authorization Core
+
+Goal: make identity safe and shared before porting business behavior.
+
+Deliverables:
+
+- session verifier for NextAuth JWT or a Next.js identity bridge;
+- user/profile/org/team membership resolver;
+- explicit policy package for system admin, org owner/admin/member, team roles, platform OAuth permissions, PBAC-style checks; the first booking read/write/host-action canary now requires both named permissions and owner or host resource scope;
+- route policy manifests and secret classification for every auth-protected route;
+- API key verifier;
+- platform OAuth client/access-token verifier;
+- fixes for known unsafe contracts: immutable identity, real membership role enforcement, no secret-bearing DTOs.
+
+References:
+
+- [Backend Contracts: Auth Contracts](backend-contracts.md#auth-contracts)
+- [Data Model Contracts: Identity, Organization, and Authorization](data-model-contracts.md#identity-organization-and-authorization)
+
+Exit criteria:
+
+- auth matrix passes in Go and matches legacy for valid behavior;
+- intentional security breaks have regression tests;
+- route policy/auth-mode coverage and secret scanners pass for implemented routes;
+- no service endpoint relies on email as primary identity; the implemented booking routes now gate fixture resources by immutable principal id, not email.
+
+## Phase 3: Read-Heavy Domains
+
+Goal: move low-risk reads first while preserving UI payloads.
+
+Candidate domains:
+
+- `me.get`, `platformMe`, user profile reads;
+- public event type reads;
+- event type list/read;
+- schedules read/default schedule;
+- connected calendars read without credential exposure;
+- timezones/i18n/feature map reads;
+- API v2 provider/me/timezone reads.
+
+References:
+
+- [Feature Inventory](feature-inventory.md)
+- [Data Model Contracts](data-model-contracts.md)
+
+Exit criteria:
+
+- reads pass golden response tests;
+- Next.js screens load unchanged through the bridge;
+- no sensitive fields appear in responses.
+
+## Phase 4: Availability and Slot Engine
+
+Goal: port the scheduling core before booking writes.
+
+Deliverables:
+
+- schedule and availability services;
+- slot lookup by event type, time range, and timezone; the first `GET /v2/slots` canary is now captured and served by `backend/internal/slots/`, booking creation calls the same service through a validation-only availability adapter, and the Compose path now reads the fixture slot from `event_types` and `availability_slots`;
+- busy-time provider ports for internal bookings and external calendars; the first internal-booking provider filters accepted `bookings` rows from slot reads and booking availability checks;
+- selected-calendar and destination-calendar handling;
+- timezone and DST test suite;
+- OOO, travel schedule, holiday, buffers, booking limits, duration limits, and seated-event support;
+- slot reservation compatibility.
+
+References:
+
+- [Feature Inventory: Availability, schedules, slots](feature-inventory.md#feature-domains)
+- [Data Model Contracts: Scheduling and Event Types](data-model-contracts.md#scheduling-and-event-types)
+
+Exit criteria:
+
+- slot golden tests match legacy for representative scenarios;
+- performance is measured against existing heavy slot paths;
+- booking creation and reschedule can call the Go slot engine in validation-only mode. The first slot-service adapter rejects unavailable create and reschedule requests before persistence, can read fixture slots from Postgres, and filters accepted internal bookings.
+
+## Phase 5: Booking Write Path
+
+Goal: port create/cancel/reschedule/confirm/decline with all side effects.
+
+Deliverables:
+
+- booking aggregate service with transactional writes; booking rows, idempotency keys, and planned side-effect records now commit together in the Postgres canary, and idempotency conflicts replay the first accepted booking;
+- attendee, guest, seat, recurring, no-show, reassignment, report, and internal-note behavior;
+- calendar event create/update/delete provider ports; cancel, reschedule, confirm, and decline now start with typed fixture side-effect planners, the first durable calendar transport canary now writes contract-safe envelopes plus outbound attempt state for cancel and reschedule effects without storing provider credentials or raw provider responses, selected/destination calendar refs plus opaque external calendar event ids now persist in structured booking rows and retry-safe calendar payload hints, and the first typed calendar provider adapter now translates those generic queue records into fixture Google-style mutation requests at send time;
+- conferencing creation and cleanup ports;
+- email enqueueing; cancel, reschedule, confirm, and decline now expose planned fixture email effects through the same port boundary, queued email side effects now persist the payload hints needed for retry-safe delivery reconstruction, and the first durable email transport lane now writes contract-safe envelopes plus outbound attempt state without storing provider secrets or raw provider responses while the first typed email provider adapter translates those generic queue records into fixture Resend-style requests at send time;
+- webhook emission; cancel, reschedule, confirm, and decline now expose planned fixture webhook effects through the same port boundary, and the current Postgres canary persists typed webhook payload hints with the queued side effect so retries can rebuild contract-safe bodies without request-only inputs;
+- side-effect worker boundary; the current canary is packaged as an optional Compose worker, claims planned or retryable rows with row locks, writes a durable dispatch-log row through the dispatcher port, records typed booking webhook envelopes in `booking_webhook_deliveries`, selects active subscribers by trigger from `booking_webhook_subscriptions`, snapshots signed outbound attempts in `booking_webhook_delivery_attempts`, sends real HTTP webhook POSTs, retries only the pending subscriber rows, dead-letters exhausted attempts, disables failing subscriptions, records typed email envelopes in `booking_email_deliveries`, snapshots outbound email attempts in `booking_email_delivery_attempts`, routes them through the first typed email provider adapter, sends real HTTP email provider POSTs to the configured sink, records typed calendar canary envelopes in `booking_calendar_dispatches`, snapshots outbound calendar attempts in `booking_calendar_dispatch_attempts`, routes them through the first typed calendar provider adapter, sends real HTTP calendar provider POSTs to the configured sink, and logs basic webhook delivery metrics while keeping webhook signing secrets outside the database behind key refs;
+- payment state integration;
+- idempotency and retry semantics; the current Postgres repository rejects conflicting idempotency writes without overwriting the original booking.
+
+References:
+
+- [Backend Contracts: Side-Effect Contracts](backend-contracts.md#side-effect-contracts)
+- [Data Model Contracts: Bookings](data-model-contracts.md#bookings)
+
+Exit criteria:
+
+- golden booking state tests pass;
+- provider calls are mocked and asserted;
+- duplicate booking and retry tests pass; the current Postgres canary includes idempotency conflict replay, rollback coverage for failed planned side-effect writes, queued webhook payload coverage, queued email payload coverage, active-subscriber selection coverage, signed-attempt persistence coverage, HTTP webhook delivery coverage, email-envelope persistence coverage, email attempt persistence coverage, typed email-provider request coverage, exhausted-attempt dead-letter coverage, subscriber disable coverage, calendar-envelope persistence coverage, calendar attempt persistence coverage, selected/destination calendar ref persistence coverage, opaque external calendar event id persistence coverage, typed calendar-provider request coverage, and worker canary coverage for claiming, webhook-envelope recording, email-envelope recording, calendar-envelope recording, dispatch-log recording, delivering, retrying only pending subscriber attempts, and retry-marking planned side effects;
+- existing booking UI flows pass through the Next.js bridge.
+
+## Phase 6: Integrations, Credentials, and App Store
+
+Goal: port integration management while tightening secret boundaries.
+
+Deliverables:
+
+- credential metadata storage; the first canary now persists and reads non-secret integration credential metadata in `integration_credential_metadata`, exposes `GET /v2/credentials`, refreshes provider health through sanitized status/status-code fields only, and keeps encrypted provider payloads, provider tokens, refresh tokens, raw provider responses, and raw provider errors absent from both storage and responses while the real encryption/decryption service is still pending;
+- provider-specific credential structs;
+- app metadata reader or generated app catalog; the first canary now persists non-secret integration app metadata in `integration_app_catalog`, exposes `GET /v2/apps` behind `policy.apps.read`, returns provider/category/auth/capability metadata without credential refs, account refs, provider tokens, raw provider responses, or signing material, records first-step app install intents in `integration_app_install_intents` behind `policy.apps.install` using only opaque intent refs plus pending status, exposes current-user install intents through `GET /v2/app-install-intents`, moves owned pending intents into `requires_external_auth` through `POST /v2/app-install-intents/{installIntentRef}/external-auth`, derives a read-only external-auth descriptor through `GET /v2/app-install-intents/{installIntentRef}/external-auth` with provider/display/auth/scope metadata plus a persisted non-secret handoff state ref and expiry, consumes that state exactly once through `POST /v2/app-install-intents/{installIntentRef}/external-auth/consume`, can use the same one-time handoff state gate to persist and return a metadata-only authorization preview through `POST /v2/app-install-intents/{installIntentRef}/external-auth/authorization-preview` with authorization preview ref, provider slug, requested scopes, state ref, placeholder authorization endpoint id, preview status, request timestamp, and expiry, can record a sanitized callback preflight through `POST /v2/app-install-intents/{installIntentRef}/external-auth/callback-preflight` with provider-neutral status and audit timestamps only, can record a simulated provider-exchange stub through `POST /v2/app-install-intents/{installIntentRef}/external-auth/provider-exchange` with callback preflight ref, state ref, queued or blocked exchange status, simulated exchange mode, and audit timestamps only, can record terminal simulated completion through `POST /v2/app-install-intents/{installIntentRef}/complete` with provider exchange ref, installed or blocked status, simulated completion mode, and audit timestamps only, can activate a current-user installed-app projection through `POST /v2/app-install-intents/{installIntentRef}/activate` using only install completion refs plus non-secret app/provider catalog metadata, exposes installed-app projections through `GET /v2/app-installations`, and exposes `GET /v2/app-install-intents/{installIntentRef}/progress` as a sanitized read model over current-user intent, handoff, preview, callback preflight, provider-exchange, completion, and installation state, still without token exchange, redirect generation, raw callback query capture, provider code acceptance, provider calls, provider responses, provider account creation, credential refs, or provider credential storage;
+- calendar, conferencing, CRM, analytics, and payment provider ports;
+- selected/destination calendar mutation flows; the first current-user route slice now supports `GET` and `POST` for selected calendars, `DELETE` by calendar ref, and `GET` plus `POST` for the current destination calendar using opaque refs plus non-secret provider metadata stored in dedicated calendar-management tables, while the provider-backed slice now transactionally syncs calendar connections and catalog rows from the typed calendar provider adapter, prunes stale synced rows, refreshes selected-calendar snapshots, exposes read routes for each, validates selected-calendar writes against that synced catalog before persisting the snapshot, records connection status transitions, and refreshes operational connection status through generic status codes without storing provider credentials;
+- default conferencing app behavior;
+- explicit no-leak tests for credential fields.
+
+References:
+
+- [Feature Inventory: Apps and credentials](feature-inventory.md#feature-domains)
+- [Data Model Contracts: Credentials, Apps, and Integrations](data-model-contracts.md#credentials-apps-and-integrations)
+
+Exit criteria:
+
+- integration settings screens work unchanged;
+- credential secrets are never returned;
+- provider callback flows have signature/state tests.
+
+## Phase 7: Platform API and OAuth
+
+Goal: expose the external API as a compatible Go service.
+
+Deliverables:
+
+- API v2 routes with matching versioned DTOs;
+- OAuth2 authorization, token exchange, refresh, and provider endpoints; the first `POST /v2/auth/oauth2/token` canary now supports authorization-code exchange and refresh-token rotation for the fixture OAuth client, consumes authorization codes atomically, revokes old refresh-token rows on rotation, returns newly issued access and refresh tokens only in successful responses, stores authorization codes plus issued tokens only as SHA-256 hashes, and resolves valid unexpired and unrevoked access tokens into scope-limited principals for booking read, create/cancel/reschedule writes, and confirm/decline host actions;
+- platform OAuth clients, managed users, tokens, permissions, and webhooks;
+- API key refresh and validation;
+- atomic authorization code consumption; started with the fixture authorization-code exchange canary, refresh-token rotation canary, replay-denial tests, and hashed access-token authentication tests for booking reads, booking writes, and booking host actions;
+- secret rotation and hashed platform OAuth client secrets.
+
+References:
+
+- [Backend Contracts: API v2 Plane](backend-contracts.md#2-api-v2-plane)
+- [Data Model Contracts: OAuth and Platform API](data-model-contracts.md#oauth-and-platform-api)
+
+Exit criteria:
+
+- API v2 golden tests pass;
+- external clients can use old routes without code changes except intentional secret behavior changes;
+- security audit findings in this area are closed.
+
+## Phase 8: Jobs, Webhooks, and Operations
+
+Goal: move background work out of Next.js and into Go workers.
+
+Deliverables:
+
+- Go worker process;
+- cron compatibility endpoints;
+- webhook delivery queue with retries and observability;
+- booking reminder, timezone-change, selected-calendar, subscription cleanup, no-show, audit, analytics, and translation jobs;
+- idempotent job locks and retry policies.
+
+References:
+
+- [Backend Contracts: Webhook and Event Contract Plane](backend-contracts.md#5-webhook-and-event-contract-plane)
+- [Backend Contracts: Job and Cron Plane](backend-contracts.md#6-job-and-cron-plane)
+
+Exit criteria:
+
+- cron routes trigger Go jobs;
+- duplicate job execution is safe;
+- webhook payload golden fixtures pass;
+- job metrics and dead-letter visibility exist.
+
+## Phase 9: Cutover, Shadowing, and Decommission
+
+Goal: switch traffic safely and remove compatibility scaffolding only when it is no longer needed.
+
+Deliverables:
+
+- endpoint-by-endpoint shadow-read comparisons;
+- write canaries for low-risk domains;
+- rollback switches;
+- operational dashboards for latency, errors, queue depth, provider failures, webhook failures, and auth denials;
+- deprecation map for old Next.js backend code;
+- post-cutover security review.
+
+Exit criteria:
+
+- all target endpoints run through Go in production;
+- Next.js backend handlers are either deleted or reduced to compatibility proxies;
+- no unowned cron/task routes remain;
+- contract docs are updated to describe the new source of truth.

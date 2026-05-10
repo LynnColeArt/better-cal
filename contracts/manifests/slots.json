@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/fixture-set.schema.json",
+  "id": "slots",
+  "status": "draft",
+  "description": "Initial fixture set for API v2 slot read compatibility.",
+  "owner": "compatibility-qa",
+  "fixtures": [
+    {
+      "id": "slots.read.personal-basic",
+      "surface": "api-v2",
+      "operation": "GET /v2/slots",
+      "status": "needs-capture",
+      "auth": "none",
+      "comparison": "schema",
+      "securityBreaks": [],
+      "inputs": [],
+      "outputs": [],
+      "schemas": [],
+      "redactions": [],
+      "unstableFields": ["requestId"],
+      "owner": "compatibility-qa"
+    }
+  ]
+}

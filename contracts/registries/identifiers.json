@@ -1,0 +1,127 @@
+{
+  "$schema": "../schemas/identifier-registry.schema.json",
+  "status": "draft",
+  "description": "Initial public and persistence identifier registry.",
+  "identifiers": [
+    {
+      "id": "identifier.user.id",
+      "name": "userId",
+      "kind": "database-integer",
+      "publicExposure": "conditional",
+      "uniquenessScope": "global",
+      "entropy": "low",
+      "stability": "stable",
+      "notes": "Internal service identity may use this; do not use as a public bearer capability."
+    },
+    {
+      "id": "identifier.user.uuid",
+      "name": "userUuid",
+      "kind": "uuid",
+      "publicExposure": "allowed",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "stable",
+      "notes": "Preferred public user identifier where a public user id is required."
+    },
+    {
+      "id": "identifier.profile.uid",
+      "name": "profileUid",
+      "kind": "opaque-string",
+      "publicExposure": "allowed",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "stable",
+      "notes": "Represents profile identity in an organization context."
+    },
+    {
+      "id": "identifier.team.id",
+      "name": "teamId",
+      "kind": "database-integer",
+      "publicExposure": "conditional",
+      "uniquenessScope": "global",
+      "entropy": "low",
+      "stability": "stable",
+      "notes": "Must be paired with authorization checks."
+    },
+    {
+      "id": "identifier.booking.uid",
+      "name": "bookingUid",
+      "kind": "opaque-string",
+      "publicExposure": "allowed",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "stable",
+      "notes": "Public booking identifier used in URLs and API routes."
+    },
+    {
+      "id": "identifier.booking.seatUid",
+      "name": "seatUid",
+      "kind": "opaque-string",
+      "publicExposure": "allowed",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "stable",
+      "notes": "Public seat identifier for seated booking lookups."
+    },
+    {
+      "id": "identifier.oauth.clientId",
+      "name": "clientId",
+      "kind": "opaque-string",
+      "publicExposure": "allowed",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "stable",
+      "notes": "OAuth client id; not secret by itself."
+    },
+    {
+      "id": "identifier.oauth.authorizationCode",
+      "name": "code",
+      "kind": "opaque-string",
+      "publicExposure": "input-only",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "single-use",
+      "notes": "Must be short-lived, client-bound, redirect-bound, and consumed atomically."
+    },
+    {
+      "id": "identifier.token.accessToken",
+      "name": "accessToken",
+      "kind": "bearer-token",
+      "publicExposure": "show-once",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "expires",
+      "notes": "Secret-bearing bearer token."
+    },
+    {
+      "id": "identifier.token.refreshToken",
+      "name": "refreshToken",
+      "kind": "bearer-token",
+      "publicExposure": "show-once",
+      "uniquenessScope": "global",
+      "entropy": "high",
+      "stability": "rotatable",
+      "notes": "Secret-bearing token; replay behavior must be fixture-tested."
+    },
+    {
+      "id": "identifier.webhook.id",
+      "name": "webhookId",
+      "kind": "database-or-opaque-id",
+      "publicExposure": "allowed",
+      "uniquenessScope": "global",
+      "entropy": "unknown",
+      "stability": "stable",
+      "notes": "Every read/write requires ownership or platform authorization."
+    },
+    {
+      "id": "identifier.slug",
+      "name": "slug",
+      "kind": "human-readable-string",
+      "publicExposure": "allowed",
+      "uniquenessScope": "domain-specific",
+      "entropy": "low",
+      "stability": "mutable",
+      "notes": "Normalization and uniqueness scope are contract behavior."
+    }
+  ]
+}

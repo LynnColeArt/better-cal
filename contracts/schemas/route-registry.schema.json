@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/route-registry.schema.json",
+  "title": "Route Registry",
+  "type": "object",
+  "required": ["status", "description", "routes"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "status": { "type": "string" },
+    "description": { "type": "string" },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "surface", "method", "path", "versions", "status", "priority", "spec", "policy", "schemaRefs", "fixtureRefs"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "surface": { "type": "string" },
+          "method": { "type": "string" },
+          "path": { "type": "string" },
+          "versions": { "type": "array", "items": { "type": "string" } },
+          "status": { "type": "string" },
+          "priority": { "type": "string" },
+          "spec": { "type": "string" },
+          "policy": { "type": "string" },
+          "schemaRefs": { "type": "array", "items": { "type": "string" } },
+          "fixtureRefs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

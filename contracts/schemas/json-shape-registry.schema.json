@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/json-shape-registry.schema.json",
+  "title": "JSON Shape Registry",
+  "type": "object",
+  "required": ["status", "description", "jsonShapes"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "status": { "type": "string" },
+    "description": { "type": "string" },
+    "jsonShapes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "ownerDomain",
+          "storageField",
+          "status",
+          "publicExposure",
+          "secretFields",
+          "unknownFieldBehavior"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "ownerDomain": { "type": "string" },
+          "storageField": { "type": "string" },
+          "status": { "type": "string" },
+          "publicExposure": { "type": "string" },
+          "secretFields": { "type": "array", "items": { "type": "string" } },
+          "unknownFieldBehavior": { "type": "string" }
+        }
+      }
+    }
+  }
+}

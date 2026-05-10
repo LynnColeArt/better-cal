@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/enum-registry.schema.json",
+  "title": "Enum Registry",
+  "type": "object",
+  "required": ["status", "description", "enums"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "status": { "type": "string" },
+    "description": { "type": "string" },
+    "enums": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "values"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string" },
+          "values": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

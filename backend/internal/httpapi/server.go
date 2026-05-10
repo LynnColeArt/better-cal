@@ -1,0 +1,336 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/LynnColeArt/better-cal/backend/internal/apps"
+	"github.com/LynnColeArt/better-cal/backend/internal/auth"
+	"github.com/LynnColeArt/better-cal/backend/internal/authz"
+	"github.com/LynnColeArt/better-cal/backend/internal/booking"
+	"github.com/LynnColeArt/better-cal/backend/internal/calendars"
+	"github.com/LynnColeArt/better-cal/backend/internal/config"
+	"github.com/LynnColeArt/better-cal/backend/internal/credentials"
+	"github.com/LynnColeArt/better-cal/backend/internal/logging"
+	"github.com/LynnColeArt/better-cal/backend/internal/slots"
+)
+
+type contextKey string
+
+const requestIDKey contextKey = "request-id"
+
+type Server struct {
+	cfg             config.Config
+	authService     *auth.Service
+	authorizer      *authz.Authorizer
+	appStore        *apps.Store
+	bookingStore    *booking.Store
+	calendarStore   *calendars.Store
+	credentialStore *credentials.Store
+	slotService     *slots.Service
+	logger          *slog.Logger
+	mux             *http.ServeMux
+}
+
+type Option func(*Server)
+
+func WithAppStore(store *apps.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.appStore = store
+		}
+	}
+}
+
+func WithBookingStore(store *booking.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.bookingStore = store
+		}
+	}
+}
+
+func WithCalendarStore(store *calendars.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.calendarStore = store
+		}
+	}
+}
+
+func WithCredentialStore(store *credentials.Store) Option {
+	return func(s *Server) {
+		if store != nil {
+			s.credentialStore = store
+		}
+	}
+}
+
+func WithAuthService(service *auth.Service) Option {
+	return func(s *Server) {
+		if service != nil {
+			s.authService = service
+		}
+	}
+}
+
+func WithSlotService(service *slots.Service) Option {
+	return func(s *Server) {
+		if service != nil {
+			s.slotService = service
+		}
+	}
+}
+
+func NewServer(cfg config.Config, opts ...Option) http.Handler {
+	return NewServerWithLogger(cfg, slog.Default(), opts...)
+}
+
+func NewServerWithLogger(cfg config.Config, logger *slog.Logger, opts ...Option) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	server := &Server{
+		cfg:        cfg,
+		authorizer: authz.NewAuthorizer(),
+		logger:     logger,
+		mux:        http.NewServeMux(),
+	}
+	for _, opt := range opts {
+		opt(server)
+	}
+	if server.authService == nil {
+		server.authService = auth.NewService(cfg)
+	}
+	if server.slotService == nil {
+		server.slotService = slots.NewService()
+	}
+	if server.appStore == nil {
+		server.appStore = apps.NewStore()
+	}
+	if server.calendarStore == nil {
+		server.calendarStore = calendars.NewStore()
+	}
+	if server.credentialStore == nil {
+		server.credentialStore = credentials.NewStore()
+	}
+	if server.bookingStore == nil {
+		server.bookingStore = booking.NewStore(
+			booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(server.slotService)),
+		)
+	}
+	server.routes()
+	return server
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	requestID := r.Header.Get("x-request-id")
+	if requestID == "" {
+		requestID = s.cfg.RequestID
+	}
+	r = r.WithContext(context.WithValue(r.Context(), requestIDKey, requestID))
+	recorder := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
+	startedAt := time.Now()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			s.logger.ErrorContext(
+				r.Context(),
+				"http request panic",
+				"request_id", requestID,
+				"method", r.Method,
+				"path", r.URL.Path,
+			)
+			if !recorder.wrote {
+				s.sendError(recorder, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "Internal server error", true)
+			}
+		}
+		s.logger.InfoContext(
+			r.Context(),
+			"http request",
+			"request_id", requestID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", recorder.status,
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"headers", logging.RedactHeaders(r.Header),
+		)
+	}()
+
+	s.mux.ServeHTTP(recorder, r)
+}
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /health", s.health)
+	s.mux.HandleFunc("GET /v2/me", s.me)
+	s.mux.HandleFunc("GET /v2/apps", s.readAppCatalog)
+	s.mux.HandleFunc("GET /v2/app-installations", s.readAppInstallations)
+	s.mux.HandleFunc("GET /v2/app-install-intents", s.readAppInstallIntents)
+	s.mux.HandleFunc("POST /v2/app-install-intents", s.createAppInstallIntent)
+	s.mux.HandleFunc("GET /v2/app-install-intents/{installIntentRef}/external-auth", s.readAppInstallIntentExternalAuth)
+	s.mux.HandleFunc("POST /v2/app-install-intents/{installIntentRef}/external-auth", s.markAppInstallIntentExternalAuth)
+	s.mux.HandleFunc("POST /v2/app-install-intents/{installIntentRef}/external-auth/consume", s.consumeAppInstallIntentExternalAuth)
+	s.mux.HandleFunc("POST /v2/app-install-intents/{installIntentRef}/external-auth/authorization-preview", s.previewAppInstallIntentExternalAuthAuthorization)
+	s.mux.HandleFunc("POST /v2/app-install-intents/{installIntentRef}/external-auth/callback-preflight", s.preflightAppInstallIntentExternalAuthCallback)
+	s.mux.HandleFunc("POST /v2/app-install-intents/{installIntentRef}/external-auth/provider-exchange", s.exchangeAppInstallIntentExternalAuthProvider)
+	s.mux.HandleFunc("POST /v2/app-install-intents/{installIntentRef}/complete", s.completeAppInstallIntent)
+	s.mux.HandleFunc("POST /v2/app-install-intents/{installIntentRef}/activate", s.activateAppInstallIntent)
+	s.mux.HandleFunc("GET /v2/app-install-intents/{installIntentRef}/progress", s.readAppInstallIntentProgress)
+	s.mux.HandleFunc("GET /v2/calendar-connections", s.readCalendarConnections)
+	s.mux.HandleFunc("GET /v2/calendars", s.readCalendarCatalog)
+	s.mux.HandleFunc("GET /v2/credentials", s.readCredentialMetadata)
+	s.mux.HandleFunc("GET /v2/selected-calendars", s.readSelectedCalendars)
+	s.mux.HandleFunc("POST /v2/selected-calendars", s.saveSelectedCalendar)
+	s.mux.HandleFunc("DELETE /v2/selected-calendars/{calendarRef}", s.deleteSelectedCalendar)
+	s.mux.HandleFunc("GET /v2/destination-calendars", s.readDestinationCalendar)
+	s.mux.HandleFunc("POST /v2/destination-calendars", s.saveDestinationCalendar)
+	s.mux.HandleFunc("GET /v2/slots", s.readSlots)
+	s.mux.HandleFunc("POST /v2/bookings", s.createBooking)
+	s.mux.HandleFunc("GET /v2/bookings/{bookingUid}", s.readBooking)
+	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/cancel", s.cancelBooking)
+	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/reschedule", s.rescheduleBooking)
+	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/confirm", s.confirmBooking)
+	s.mux.HandleFunc("POST /v2/bookings/{bookingUid}/decline", s.declineBooking)
+	s.mux.HandleFunc("GET /v2/auth/oauth2/clients/{clientId}", s.oauthClientMetadata)
+	s.mux.HandleFunc("POST /v2/auth/oauth2/token", s.oauthToken)
+	s.mux.HandleFunc("GET /v2/oauth-clients/{clientId}", s.platformClient)
+}
+
+func (s *Server) sendJSON(w http.ResponseWriter, r *http.Request, status int, body any) {
+	w.Header().Set("content-type", "application/json")
+	w.Header().Set("x-request-id", s.requestID(r))
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func (s *Server) sendError(w http.ResponseWriter, r *http.Request, status int, code string, message string, includeRequestID bool) {
+	apiErr := &err{Code: code, Message: message}
+	if includeRequestID {
+		apiErr.RequestID = s.requestID(r)
+	}
+	s.sendJSON(w, r, status, envelope{Status: "error", Error: apiErr})
+}
+
+func decodeJSON(r *http.Request, target any) bool {
+	if r.Body == nil {
+		return true
+	}
+	defer r.Body.Close()
+	return json.NewDecoder(r.Body).Decode(target) == nil
+}
+
+func decodeStrictJSON(r *http.Request, target any) bool {
+	if r.Body == nil {
+		return false
+	}
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target) == nil
+}
+
+func (s *Server) authenticateAPIKey(r *http.Request) (auth.Principal, bool, error) {
+	return s.authenticator().AuthenticateAPIKeyContext(r.Context(), r.Header.Get("authorization"))
+}
+
+func (s *Server) authenticateAPIKeyOrOAuthAccessToken(r *http.Request) (auth.Principal, bool, error) {
+	principal, ok, err := s.authenticateAPIKey(r)
+	if err != nil || ok {
+		return principal, ok, err
+	}
+	return s.authenticator().AuthenticateOAuthAccessTokenContext(r.Context(), r.Header.Get("authorization"))
+}
+
+func (s *Server) authenticator() *auth.Service {
+	if s.authService != nil {
+		return s.authService
+	}
+	return auth.NewService(s.cfg)
+}
+
+func (s *Server) authorize(principal auth.Principal, policy authz.Policy) bool {
+	return s.policies().Authorize(principal, policy).Allowed
+}
+
+func (s *Server) policies() *authz.Authorizer {
+	if s.authorizer != nil {
+		return s.authorizer
+	}
+	s.authorizer = authz.NewAuthorizer()
+	return s.authorizer
+}
+
+func (s *Server) apps() *apps.Store {
+	if s.appStore != nil {
+		return s.appStore
+	}
+	s.appStore = apps.NewStore()
+	return s.appStore
+}
+
+func (s *Server) bookings() *booking.Store {
+	if s.bookingStore != nil {
+		return s.bookingStore
+	}
+	s.bookingStore = booking.NewStore(
+		booking.WithSlotAvailabilityPort(booking.NewSlotServiceAvailabilityPort(s.slots())),
+	)
+	return s.bookingStore
+}
+
+func (s *Server) calendars() *calendars.Store {
+	if s.calendarStore != nil {
+		return s.calendarStore
+	}
+	s.calendarStore = calendars.NewStore()
+	return s.calendarStore
+}
+
+func (s *Server) credentials() *credentials.Store {
+	if s.credentialStore != nil {
+		return s.credentialStore
+	}
+	s.credentialStore = credentials.NewStore()
+	return s.credentialStore
+}
+
+func (s *Server) slots() *slots.Service {
+	if s.slotService != nil {
+		return s.slotService
+	}
+	s.slotService = slots.NewService()
+	return s.slotService
+}
+
+func (s *Server) requestID(r *http.Request) string {
+	requestID, _ := r.Context().Value(requestIDKey).(string)
+	if requestID == "" {
+		return s.cfg.RequestID
+	}
+	return requestID
+}
+
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+	wrote  bool
+}
+
+func (r *responseRecorder) WriteHeader(status int) {
+	if r.wrote {
+		return
+	}
+	r.status = status
+	r.wrote = true
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *responseRecorder) Write(body []byte) (int, error) {
+	if !r.wrote {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(body)
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cal.diy/contracts/schemas/request-template.schema.json",
+  "title": "Fixture Request Template",
+  "type": "object",
+  "required": ["captureMode"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "captureMode": { "type": "string", "enum": ["http", "manual"] },
+    "method": { "type": "string" },
+    "path": { "type": "string" },
+    "pathParams": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "query": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "number" },
+          { "type": "boolean" },
+          { "type": "array", "items": { "type": ["string", "number", "boolean"] } }
+        ]
+      }
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "body": {},
+    "expectStatus": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "notes": { "type": "string" }
+  }
+}

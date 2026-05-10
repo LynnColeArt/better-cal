@@ -1,0 +1,97 @@
+{
+  "$schema": "../schemas/json-shape-registry.schema.json",
+  "status": "draft",
+  "description": "Initial stored JSON shape registry. Field-level schemas still need capture.",
+  "jsonShapes": [
+    {
+      "id": "json.eventType.locations",
+      "ownerDomain": "event-type",
+      "storageField": "eventType.locations",
+      "status": "needs-capture",
+      "publicExposure": "public-response",
+      "secretFields": [],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.eventType.bookingFields",
+      "ownerDomain": "event-type",
+      "storageField": "eventType.bookingFields",
+      "status": "needs-capture",
+      "publicExposure": "public-response",
+      "secretFields": [],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.eventType.metadata",
+      "ownerDomain": "event-type",
+      "storageField": "eventType.metadata",
+      "status": "needs-capture",
+      "publicExposure": "filtered-response",
+      "secretFields": [],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.booking.responses",
+      "ownerDomain": "booking",
+      "storageField": "booking.responses",
+      "status": "needs-capture",
+      "publicExposure": "filtered-response",
+      "secretFields": [],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.booking.metadata",
+      "ownerDomain": "booking",
+      "storageField": "booking.metadata",
+      "status": "needs-capture",
+      "publicExposure": "filtered-response",
+      "secretFields": [],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.booking.customInputs",
+      "ownerDomain": "booking",
+      "storageField": "booking.customInputs",
+      "status": "needs-capture",
+      "publicExposure": "filtered-response",
+      "secretFields": [],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.credential.providerPayload",
+      "ownerDomain": "credential",
+      "storageField": "credential.key",
+      "status": "needs-capture",
+      "publicExposure": "never-public",
+      "secretFields": ["access_token", "refresh_token", "client_secret"],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.webhook.payloadTemplate",
+      "ownerDomain": "webhook",
+      "storageField": "webhook.payloadTemplate",
+      "status": "needs-capture",
+      "publicExposure": "public-response",
+      "secretFields": [],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.bookingReference.providerData",
+      "ownerDomain": "booking",
+      "storageField": "bookingReference.providerData",
+      "status": "needs-capture",
+      "publicExposure": "filtered-response",
+      "secretFields": ["access_token", "refresh_token"],
+      "unknownFieldBehavior": "needs-capture"
+    },
+    {
+      "id": "json.payment.metadata",
+      "ownerDomain": "payment",
+      "storageField": "payment.metadata",
+      "status": "needs-capture",
+      "publicExposure": "filtered-response",
+      "secretFields": ["client_secret", "payment_method"],
+      "unknownFieldBehavior": "needs-capture"
+    }
+  ]
+}

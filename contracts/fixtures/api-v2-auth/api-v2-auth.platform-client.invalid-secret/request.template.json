@@ -1,0 +1,15 @@
+{
+  "$schema": "../../../schemas/request-template.schema.json",
+  "captureMode": "http",
+  "method": "GET",
+  "path": "/v2/oauth-clients/{clientId}",
+  "pathParams": {
+    "clientId": "${CALDIY_PLATFORM_CLIENT_ID}"
+  },
+  "headers": {
+    "x-cal-client-id": "${CALDIY_PLATFORM_CLIENT_ID}",
+    "x-cal-secret-key": "invalid-fixture-secret",
+    "cal-api-version": "2024-08-13"
+  },
+  "expectStatus": [401, 403]
+}

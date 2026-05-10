@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../schemas/request-template.schema.json",
+  "captureMode": "http",
+  "method": "GET",
+  "path": "/v2/slots",
+  "query": {
+    "eventTypeId": 1001,
+    "start": "2026-05-01T00:00:00.000Z",
+    "end": "2026-05-02T00:00:00.000Z",
+    "timeZone": "America/Chicago"
+  },
+  "headers": {
+    "cal-api-version": "2024-09-04"
+  },
+  "expectStatus": [200]
+}
