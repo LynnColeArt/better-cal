@@ -126,7 +126,14 @@ func main() {
 			credentialStore,
 		))
 		serverOptions = append(serverOptions, httpapi.WithAppStore(
-			apps.NewStoreWithRepository(appRepository),
+			apps.NewStoreWithRepository(
+				appRepository,
+				apps.WithProviderOAuthExchangePort(apps.NewFixtureProviderOAuthExchangePort()),
+				apps.WithProviderCredentialStore(credentials.NewProviderCredentialStore(
+					credentialRepository,
+					credentials.NewInMemoryProviderTokenSecretStore(),
+				)),
+			),
 		))
 		calendarStore := calendars.NewStoreWithRepository(
 			calendars.NewPostgresRepository(pool),

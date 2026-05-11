@@ -196,6 +196,73 @@ func (r *PostgresRepository) ReadInstallProgress(ctx context.Context, userID int
 	), nil
 }
 
+func (r *PostgresRepository) ReadExternalAuthCallbackPreflight(ctx context.Context, userID int, installIntentRef string, stateRef string, callbackPreflightRef string) (ExternalAuthCallbackPreflight, error) {
+	if userID <= 0 ||
+		strings.TrimSpace(installIntentRef) == "" ||
+		strings.TrimSpace(stateRef) == "" ||
+		strings.TrimSpace(callbackPreflightRef) == "" {
+		return ExternalAuthCallbackPreflight{}, ErrInvalidExternalAuthCallbackPreflight
+	}
+	preflight, err := scanExternalAuthCallbackPreflightRow(r.pool.QueryRow(ctx, `
+		select callback_preflight_ref, install_intent_ref, user_id, app_slug, provider, handoff_state_ref,
+			callback_status, preflight_status, received_at, created_at, updated_at
+		from integration_app_install_callback_preflights
+		where callback_preflight_ref = $1
+			and handoff_state_ref = $2
+			and install_intent_ref = $3
+			and user_id = $4
+	`, callbackPreflightRef, stateRef, installIntentRef, userID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ExternalAuthCallbackPreflight{}, ErrExternalAuthCallbackPreflightNotFound
+		}
+		return ExternalAuthCallbackPreflight{}, fmt.Errorf("read external auth callback preflight: %w", err)
+	}
+	return preflight, nil
+}
+
+func (r *PostgresRepository) ReadExternalAuthCallbackPreflightByState(ctx context.Context, stateRef string) (ExternalAuthCallbackPreflight, error) {
+	if strings.TrimSpace(stateRef) == "" {
+		return ExternalAuthCallbackPreflight{}, ErrInvalidExternalAuthCallbackPreflight
+	}
+	preflight, err := scanExternalAuthCallbackPreflightRow(r.pool.QueryRow(ctx, `
+		select callback_preflight_ref, install_intent_ref, user_id, app_slug, provider, handoff_state_ref,
+			callback_status, preflight_status, received_at, created_at, updated_at
+		from integration_app_install_callback_preflights
+		where handoff_state_ref = $1
+	`, stateRef))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ExternalAuthCallbackPreflight{}, ErrExternalAuthCallbackPreflightNotFound
+		}
+		return ExternalAuthCallbackPreflight{}, fmt.Errorf("read external auth callback preflight by state: %w", err)
+	}
+	return preflight, nil
+}
+
+func (r *PostgresRepository) ReadExternalAuthProviderExchangeByPreflight(ctx context.Context, userID int, installIntentRef string, callbackPreflightRef string) (ExternalAuthProviderExchange, error) {
+	if userID <= 0 ||
+		strings.TrimSpace(installIntentRef) == "" ||
+		strings.TrimSpace(callbackPreflightRef) == "" {
+		return ExternalAuthProviderExchange{}, ErrInvalidExternalAuthProviderExchange
+	}
+	exchange, err := scanExternalAuthProviderExchangeRow(r.pool.QueryRow(ctx, `
+		select provider_exchange_ref, install_intent_ref, user_id, app_slug, provider, handoff_state_ref,
+			callback_preflight_ref, exchange_status, exchange_mode, recorded_at, created_at, updated_at
+		from integration_app_install_provider_exchanges
+		where callback_preflight_ref = $1
+			and install_intent_ref = $2
+			and user_id = $3
+	`, callbackPreflightRef, installIntentRef, userID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ExternalAuthProviderExchange{}, ErrExternalAuthProviderExchangeNotFound
+		}
+		return ExternalAuthProviderExchange{}, fmt.Errorf("read external auth provider exchange by preflight: %w", err)
+	}
+	return exchange, nil
+}
+
 func (r *PostgresRepository) SaveAppMetadata(ctx context.Context, app AppMetadata) (AppMetadata, error) {
 	if err := ValidateAppMetadata(app); err != nil {
 		return AppMetadata{}, err
@@ -579,8 +646,8 @@ func (r *PostgresRepository) SaveExternalAuthProviderExchange(ctx context.Contex
 		strings.TrimSpace(exchange.AppSlug) == "" ||
 		strings.TrimSpace(exchange.ProviderSlug) == "" ||
 		exchange.UserID <= 0 ||
-		strings.TrimSpace(exchange.ExchangeMode) != ExternalAuthProviderExchangeModeSimulated ||
-		(exchange.ExchangeStatus != "" && exchange.ExchangeStatus != ExternalAuthProviderExchangeQueued && exchange.ExchangeStatus != ExternalAuthProviderExchangeBlocked) {
+		!isValidExternalAuthProviderExchangeMode(exchange.ExchangeMode) ||
+		(exchange.ExchangeStatus != "" && !isValidExternalAuthProviderExchangeStatus(exchange.ExchangeStatus)) {
 		return ExternalAuthProviderExchange{}, ErrInvalidExternalAuthProviderExchange
 	}
 
@@ -616,6 +683,12 @@ func (r *PostgresRepository) SaveExternalAuthProviderExchange(ctx context.Contex
 	expectedStatus := ExternalAuthProviderExchangeQueued
 	if preflight.CallbackStatus == ExternalAuthCallbackStatusDenied {
 		expectedStatus = ExternalAuthProviderExchangeBlocked
+	}
+	if exchange.ExchangeMode == ExternalAuthProviderExchangeModeProviderOAuth {
+		if preflight.CallbackStatus != ExternalAuthCallbackStatusAuthorized {
+			return ExternalAuthProviderExchange{}, ErrProviderOAuthExchangeDenied
+		}
+		expectedStatus = ExternalAuthProviderExchangeCredentialReady
 	}
 	if exchange.ExchangeStatus != "" && exchange.ExchangeStatus != expectedStatus {
 		return ExternalAuthProviderExchange{}, ErrInvalidExternalAuthProviderExchange
@@ -671,7 +744,7 @@ func (r *PostgresRepository) SaveAppInstallCompletion(ctx context.Context, compl
 		strings.TrimSpace(completion.AppSlug) == "" ||
 		strings.TrimSpace(completion.ProviderSlug) == "" ||
 		completion.UserID <= 0 ||
-		strings.TrimSpace(completion.CompletionMode) != AppInstallCompletionModeSimulated ||
+		(completion.CompletionMode != "" && !isValidAppInstallCompletionMode(completion.CompletionMode)) ||
 		(completion.CompletionStatus != "" && completion.CompletionStatus != AppInstallCompletionStatusInstalled && completion.CompletionStatus != AppInstallCompletionStatusBlocked) {
 		return AppInstallCompletion{}, ErrInvalidAppInstallCompletion
 	}
@@ -763,6 +836,14 @@ func (r *PostgresRepository) SaveAppInstallCompletion(ctx context.Context, compl
 		return AppInstallCompletion{}, ErrInvalidAppInstallCompletion
 	}
 	completion.CompletionStatus = expectedStatus
+	expectedMode := AppInstallCompletionModeSimulated
+	if exchange.ExchangeMode == ExternalAuthProviderExchangeModeProviderOAuth {
+		expectedMode = AppInstallCompletionModeProviderOAuth
+	}
+	if completion.CompletionMode != "" && completion.CompletionMode != expectedMode {
+		return AppInstallCompletion{}, ErrInvalidAppInstallCompletion
+	}
+	completion.CompletionMode = expectedMode
 
 	saved, err := scanAppInstallCompletionRow(tx.QueryRow(ctx, `
 		insert into integration_app_install_completions (
@@ -822,7 +903,7 @@ func (r *PostgresRepository) SaveAppInstallation(ctx context.Context, installati
 		strings.TrimSpace(installation.ProviderSlug) == "" ||
 		installation.UserID <= 0 ||
 		strings.TrimSpace(installation.ActivationStatus) != AppInstallationStatusActive ||
-		strings.TrimSpace(installation.ActivationMode) != AppInstallationModeSimulated {
+		(installation.ActivationMode != "" && !isValidAppInstallationMode(installation.ActivationMode)) {
 		return AppInstallation{}, ErrInvalidAppInstallation
 	}
 
@@ -897,6 +978,14 @@ func (r *PostgresRepository) SaveAppInstallation(ctx context.Context, installati
 	if intent.Status != InstallIntentStatusInstalled || completion.CompletionStatus != AppInstallCompletionStatusInstalled {
 		return AppInstallation{}, ErrAppInstallCompletionNotReady
 	}
+	expectedMode := AppInstallationModeSimulated
+	if completion.CompletionMode == AppInstallCompletionModeProviderOAuth {
+		expectedMode = AppInstallationModeProviderOAuth
+	}
+	if installation.ActivationMode != "" && installation.ActivationMode != expectedMode {
+		return AppInstallation{}, ErrInvalidAppInstallation
+	}
+	installation.ActivationMode = expectedMode
 
 	existingInstallation, err := scanAppInstallationRow(tx.QueryRow(ctx, `
 		select i.app_installation_ref, i.install_intent_ref, i.user_id, i.app_slug, c.name, c.app_category,

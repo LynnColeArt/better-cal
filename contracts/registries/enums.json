@@ -24,6 +24,36 @@
       "values": ["public", "input-only", "show-once", "internal-only", "derived"]
     },
     {
+      "id": "enum.appInstall.providerExchangeStatus",
+      "status": "draft",
+      "values": ["queued", "blocked", "credential_ready"]
+    },
+    {
+      "id": "enum.appInstall.providerExchangeMode",
+      "status": "draft",
+      "values": ["simulated", "provider_oauth"]
+    },
+    {
+      "id": "enum.appInstall.completionMode",
+      "status": "draft",
+      "values": ["simulated", "provider_oauth"]
+    },
+    {
+      "id": "enum.appInstall.activationMode",
+      "status": "draft",
+      "values": ["simulated", "provider_oauth"]
+    },
+    {
+      "id": "enum.appInstall.progressStatus",
+      "status": "draft",
+      "values": ["pending", "external_auth_ready", "handoff_ready", "handoff_consumed", "handoff_expired", "authorization_preview_recorded", "callback_preflight_recorded", "provider_exchange_queued", "provider_exchange_blocked", "provider_credential_ready", "installed", "blocked", "active"]
+    },
+    {
+      "id": "enum.appInstall.nextAction",
+      "status": "draft",
+      "values": ["start_external_auth", "read_external_auth_descriptor", "preview_authorization", "record_callback_preflight", "await_provider_exchange", "complete_install", "none", "create_new_install_intent", "restart_external_auth"]
+    },
+    {
       "id": "enum.booking.status",
       "status": "draft",
       "values": ["cancelled", "accepted", "rejected", "pending", "awaiting_host"]

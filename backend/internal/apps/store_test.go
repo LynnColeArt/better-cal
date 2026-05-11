@@ -482,6 +482,389 @@ func TestStoreRecordsExternalAuthProviderExchangeFromCallbackPreflight(t *testin
 	}
 }
 
+func TestStoreRecordsProviderOAuthExchangeOnlyThroughCredentialSeam(t *testing.T) {
+	current := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	oauthPort := &fakeProviderOAuthExchangePort{
+		result: ProviderOAuthExchangeResult{
+			AccountRef:   "google-account-oauth-fixture",
+			AccountLabel: "oauth-user@example.test",
+			Scopes:       []string{"calendar.read", "calendar.write"},
+			TokenPayload: ProviderTokenPayload{
+				AccessToken:         "provider-access-token-secret-fixture",
+				RefreshToken:        "provider-refresh-token-secret-fixture",
+				TokenType:           "Bearer",
+				ExpiresAt:           "2026-05-10T13:00:00.000Z",
+				RawProviderResponse: []byte(`{"access_token":"provider-access-token-secret-fixture","refresh_token":"provider-refresh-token-secret-fixture"}`),
+			},
+		},
+	}
+	credentialStore := &fakeProviderCredentialStore{
+		receipt: ProviderCredentialReceipt{
+			CredentialRef: "credential-oauth-fixture",
+			AccountRef:    "google-account-oauth-fixture",
+			AccountLabel:  "oauth-user@example.test",
+			Status:        "active",
+			Scopes:        []string{"calendar.read", "calendar.write"},
+		},
+	}
+	store := NewStore(
+		WithClock(func() time.Time { return current }),
+		WithProviderOAuthExchangePort(oauthPort),
+		WithProviderCredentialStore(credentialStore),
+	)
+
+	intent, preview, preflight := prepareAuthorizedOAuthPreflight(t, store)
+	exchange, receipt, err := store.ExchangeExternalAuthProviderOAuth(context.Background(), 123, intent.InstallIntentRef, ProviderOAuthExchangeRequest{
+		StateRef:             preview.StateRef,
+		CallbackPreflightRef: preflight.CallbackPreflightRef,
+		AuthorizationCode:    "provider-code-secret-fixture",
+		RedirectURI:          "https://better-cal.test/oauth/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oauthPort.input.AuthorizationCode != "provider-code-secret-fixture" {
+		t.Fatalf("oauth port authorization code = %q", oauthPort.input.AuthorizationCode)
+	}
+	if oauthPort.input.ProviderSlug != "google-calendar-fixture" {
+		t.Fatalf("oauth port provider slug = %q", oauthPort.input.ProviderSlug)
+	}
+	if credentialStore.secret.TokenPayload.AccessToken != "provider-access-token-secret-fixture" {
+		t.Fatalf("credential seam access token = %q", credentialStore.secret.TokenPayload.AccessToken)
+	}
+	if credentialStore.secret.TokenPayload.RefreshToken != "provider-refresh-token-secret-fixture" {
+		t.Fatalf("credential seam refresh token = %q", credentialStore.secret.TokenPayload.RefreshToken)
+	}
+	if exchange.ExchangeStatus != ExternalAuthProviderExchangeCredentialReady {
+		t.Fatalf("exchange status = %q", exchange.ExchangeStatus)
+	}
+	if exchange.ExchangeMode != ExternalAuthProviderExchangeModeProviderOAuth {
+		t.Fatalf("exchange mode = %q", exchange.ExchangeMode)
+	}
+	if receipt.CredentialRef != "credential-oauth-fixture" {
+		t.Fatalf("credential receipt = %#v", receipt)
+	}
+	if oauthPort.calls != 1 {
+		t.Fatalf("oauth port calls = %d", oauthPort.calls)
+	}
+	if _, _, err := store.ExchangeExternalAuthProviderOAuth(context.Background(), 123, intent.InstallIntentRef, ProviderOAuthExchangeRequest{
+		StateRef:             preview.StateRef,
+		CallbackPreflightRef: preflight.CallbackPreflightRef,
+		AuthorizationCode:    "provider-code-secret-fixture",
+	}); !errors.Is(err, ErrExternalAuthProviderExchangeRecorded) {
+		t.Fatalf("provider oauth exchange replay err = %v", err)
+	}
+	if oauthPort.calls != 1 {
+		t.Fatalf("oauth port was called on replay: %d", oauthPort.calls)
+	}
+
+	progress, err := store.ReadInstallProgress(context.Background(), 123, intent.InstallIntentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progress.ProgressStatus != InstallProgressStatusProviderCredentialReady {
+		t.Fatalf("provider credential progress status = %q", progress.ProgressStatus)
+	}
+	if progress.NextAction != InstallProgressActionCompleteInstall {
+		t.Fatalf("provider credential next action = %q", progress.NextAction)
+	}
+
+	exchangeRaw, err := json.Marshal(exchange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progressRaw, err := json.Marshal(progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{strings.ToLower(string(exchangeRaw)), strings.ToLower(string(progressRaw))} {
+		for _, forbidden := range []string{
+			"provider-code-secret-fixture",
+			"provider-access-token-secret-fixture",
+			"provider-refresh-token-secret-fixture",
+			"access_token",
+			"refresh_token",
+			"providerresponse",
+			"rawprovider",
+			"credentialref",
+			"accountref",
+			"accountlabel",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("app-install public model exposed provider credential term %q: %s", forbidden, body)
+			}
+		}
+	}
+
+	completion, err := store.CompleteAppInstall(context.Background(), 123, intent.InstallIntentRef, AppInstallCompletionRequest{
+		ProviderExchangeRef: exchange.ProviderExchangeRef,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.CompletionMode != AppInstallCompletionModeProviderOAuth {
+		t.Fatalf("provider oauth completion mode = %q", completion.CompletionMode)
+	}
+	installation, err := store.ActivateAppInstallation(context.Background(), 123, intent.InstallIntentRef, AppInstallationActivationRequest{
+		InstallCompletionRef: completion.InstallCompletionRef,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installation.ActivationMode != AppInstallationModeProviderOAuth {
+		t.Fatalf("provider oauth activation mode = %q", installation.ActivationMode)
+	}
+	completionRaw, err := json.Marshal(completion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installationRaw, err := json.Marshal(installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{strings.ToLower(string(completionRaw)), strings.ToLower(string(installationRaw))} {
+		for _, forbidden := range []string{
+			"provider-code-secret-fixture",
+			"provider-access-token-secret-fixture",
+			"provider-refresh-token-secret-fixture",
+			"access_token",
+			"refresh_token",
+			"providerresponse",
+			"rawprovider",
+			"credentialref",
+			"accountref",
+			"accountlabel",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("terminal app-install public model exposed provider credential term %q: %s", forbidden, body)
+			}
+		}
+	}
+}
+
+func TestStoreHandlesProviderOAuthCallbackFromOpaqueState(t *testing.T) {
+	current := time.Date(2026, 5, 10, 12, 20, 0, 0, time.UTC)
+	oauthPort := &fakeProviderOAuthExchangePort{
+		result: ProviderOAuthExchangeResult{
+			AccountRef:   "google-account-callback-fixture",
+			AccountLabel: "callback-user@example.test",
+			Scopes:       []string{"calendar.read"},
+			TokenPayload: ProviderTokenPayload{
+				AccessToken:  "provider-access-token-secret-fixture",
+				RefreshToken: "provider-refresh-token-secret-fixture",
+			},
+		},
+	}
+	store := NewStore(
+		WithClock(func() time.Time { return current }),
+		WithProviderOAuthExchangePort(oauthPort),
+		WithProviderCredentialStore(&fakeProviderCredentialStore{
+			receipt: ProviderCredentialReceipt{
+				CredentialRef: "credential-callback-fixture",
+				AccountRef:    "google-account-callback-fixture",
+				AccountLabel:  "callback-user@example.test",
+				Status:        "active",
+				Scopes:        []string{"calendar.read"},
+			},
+		}),
+	)
+
+	intent, preview, preflight := prepareAuthorizedOAuthPreflight(t, store)
+	result, err := store.HandleProviderOAuthCallback(context.Background(), ProviderOAuthCallbackRequest{
+		StateRef:          preview.StateRef,
+		AuthorizationCode: "provider-code-secret-fixture",
+		RedirectURI:       "https://better-cal.test/internal/provider-callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.InstallIntentRef != intent.InstallIntentRef {
+		t.Fatalf("callback result install intent ref = %q", result.InstallIntentRef)
+	}
+	if result.CallbackPreflightRef != preflight.CallbackPreflightRef {
+		t.Fatalf("callback result preflight ref = %q", result.CallbackPreflightRef)
+	}
+	if result.ProviderExchangeRef == "" {
+		t.Fatalf("callback result provider exchange ref was empty: %#v", result)
+	}
+	if result.ExchangeStatus != ExternalAuthProviderExchangeCredentialReady {
+		t.Fatalf("callback result exchange status = %q", result.ExchangeStatus)
+	}
+	if result.ExchangeMode != ExternalAuthProviderExchangeModeProviderOAuth {
+		t.Fatalf("callback result exchange mode = %q", result.ExchangeMode)
+	}
+	if !result.CredentialStored {
+		t.Fatalf("callback result credential stored = false: %#v", result)
+	}
+	if oauthPort.input.InstallIntentRef != intent.InstallIntentRef {
+		t.Fatalf("oauth input install intent ref = %q", oauthPort.input.InstallIntentRef)
+	}
+	if oauthPort.input.CallbackPreflightRef != preflight.CallbackPreflightRef {
+		t.Fatalf("oauth input preflight ref = %q", oauthPort.input.CallbackPreflightRef)
+	}
+	if oauthPort.input.AuthorizationCode != "provider-code-secret-fixture" {
+		t.Fatalf("oauth input authorization code = %q", oauthPort.input.AuthorizationCode)
+	}
+	if oauthPort.calls != 1 {
+		t.Fatalf("oauth port calls = %d", oauthPort.calls)
+	}
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.ToLower(string(raw))
+	for _, forbidden := range []string{
+		"provider-code-secret-fixture",
+		"provider-access-token-secret-fixture",
+		"provider-refresh-token-secret-fixture",
+		"access_token",
+		"refresh_token",
+		"credentialref",
+		"accountref",
+		"accountlabel",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("callback result exposed forbidden term %q: %s", forbidden, body)
+		}
+	}
+
+	if _, err := store.HandleProviderOAuthCallback(context.Background(), ProviderOAuthCallbackRequest{
+		StateRef:          preview.StateRef,
+		AuthorizationCode: "provider-code-secret-fixture",
+	}); !errors.Is(err, ErrExternalAuthProviderExchangeRecorded) {
+		t.Fatalf("callback replay err = %v", err)
+	}
+	if oauthPort.calls != 1 {
+		t.Fatalf("oauth port was called on callback replay: %d", oauthPort.calls)
+	}
+}
+
+func TestStoreProviderOAuthExchangeFailureDoesNotRecordAppInstallExchange(t *testing.T) {
+	current := time.Date(2026, 5, 10, 12, 30, 0, 0, time.UTC)
+	credentialStore := &fakeProviderCredentialStore{
+		err: ErrInvalidProviderCredentialSecret,
+	}
+	store := NewStore(
+		WithClock(func() time.Time { return current }),
+		WithProviderOAuthExchangePort(&fakeProviderOAuthExchangePort{
+			result: ProviderOAuthExchangeResult{
+				AccountRef:   "google-account-oauth-fixture",
+				AccountLabel: "oauth-user@example.test",
+				Scopes:       []string{"calendar.read"},
+				TokenPayload: ProviderTokenPayload{
+					AccessToken:  "provider-access-token-secret-fixture",
+					RefreshToken: "provider-refresh-token-secret-fixture",
+				},
+			},
+		}),
+		WithProviderCredentialStore(credentialStore),
+	)
+
+	intent, preview, preflight := prepareAuthorizedOAuthPreflight(t, store)
+	if _, _, err := store.ExchangeExternalAuthProviderOAuth(context.Background(), 123, intent.InstallIntentRef, ProviderOAuthExchangeRequest{
+		StateRef:             preview.StateRef,
+		CallbackPreflightRef: preflight.CallbackPreflightRef,
+		AuthorizationCode:    "provider-code-secret-fixture",
+	}); !errors.Is(err, ErrInvalidProviderCredentialSecret) {
+		t.Fatalf("credential failure err = %v", err)
+	}
+	progress, err := store.ReadInstallProgress(context.Background(), 123, intent.InstallIntentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progress.ProviderExchangeRecorded {
+		t.Fatalf("provider exchange was recorded after credential failure: %#v", progress)
+	}
+	if progress.ProgressStatus != InstallProgressStatusCallbackPreflight {
+		t.Fatalf("progress status after credential failure = %q", progress.ProgressStatus)
+	}
+}
+
+func TestStoreRejectsProviderOAuthExchangeForDeniedCallbackAndMissingPorts(t *testing.T) {
+	store := NewStore()
+
+	intent, err := store.CreateInstallIntent(context.Background(), 123, "google-calendar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkInstallIntentRequiresExternalAuth(context.Background(), 123, intent.InstallIntentRef); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := store.ReadExternalAuthDescriptor(context.Background(), 123, intent.InstallIntentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := store.PreflightExternalAuthCallback(context.Background(), 123, intent.InstallIntentRef, ExternalAuthCallbackPreflightRequest{
+		StateRef:       descriptor.HandoffStateRef,
+		CallbackStatus: ExternalAuthCallbackStatusDenied,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ProviderOAuthExchangeRequest{
+		StateRef:             descriptor.HandoffStateRef,
+		CallbackPreflightRef: preflight.CallbackPreflightRef,
+		AuthorizationCode:    "provider-code-secret-fixture",
+	}
+	if _, _, err := store.ExchangeExternalAuthProviderOAuth(context.Background(), 123, intent.InstallIntentRef, request); !errors.Is(err, ErrProviderOAuthExchangePortUnset) {
+		t.Fatalf("missing oauth port err = %v", err)
+	}
+
+	store = NewStore(WithProviderOAuthExchangePort(&fakeProviderOAuthExchangePort{}))
+	intent, err = store.CreateInstallIntent(context.Background(), 123, "google-calendar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkInstallIntentRequiresExternalAuth(context.Background(), 123, intent.InstallIntentRef); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err = store.ReadExternalAuthDescriptor(context.Background(), 123, intent.InstallIntentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err = store.PreflightExternalAuthCallback(context.Background(), 123, intent.InstallIntentRef, ExternalAuthCallbackPreflightRequest{
+		StateRef:       descriptor.HandoffStateRef,
+		CallbackStatus: ExternalAuthCallbackStatusDenied,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.StateRef = descriptor.HandoffStateRef
+	request.CallbackPreflightRef = preflight.CallbackPreflightRef
+	if _, _, err := store.ExchangeExternalAuthProviderOAuth(context.Background(), 123, intent.InstallIntentRef, request); !errors.Is(err, ErrProviderCredentialStoreUnset) {
+		t.Fatalf("missing credential store err = %v", err)
+	}
+
+	store = NewStore(
+		WithProviderOAuthExchangePort(&fakeProviderOAuthExchangePort{}),
+		WithProviderCredentialStore(&fakeProviderCredentialStore{}),
+	)
+	intent, err = store.CreateInstallIntent(context.Background(), 123, "google-calendar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkInstallIntentRequiresExternalAuth(context.Background(), 123, intent.InstallIntentRef); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err = store.ReadExternalAuthDescriptor(context.Background(), 123, intent.InstallIntentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err = store.PreflightExternalAuthCallback(context.Background(), 123, intent.InstallIntentRef, ExternalAuthCallbackPreflightRequest{
+		StateRef:       descriptor.HandoffStateRef,
+		CallbackStatus: ExternalAuthCallbackStatusDenied,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.StateRef = descriptor.HandoffStateRef
+	request.CallbackPreflightRef = preflight.CallbackPreflightRef
+	if _, _, err := store.ExchangeExternalAuthProviderOAuth(context.Background(), 123, intent.InstallIntentRef, request); !errors.Is(err, ErrProviderOAuthExchangeDenied) {
+		t.Fatalf("denied oauth exchange err = %v", err)
+	}
+}
+
 func TestStoreRecordsBlockedExternalAuthProviderExchangeForDeniedCallback(t *testing.T) {
 	current := time.Date(2026, 4, 30, 13, 30, 0, 0, time.UTC)
 	store := NewStore(WithClock(func() time.Time { return current }))
@@ -1635,4 +2018,62 @@ func TestExternalAuthCallbackPreflightJSONDoesNotExposeSecrets(t *testing.T) {
 			t.Fatalf("external auth callback preflight exposed forbidden term %q: %s", forbidden, body)
 		}
 	}
+}
+
+func prepareAuthorizedOAuthPreflight(t *testing.T, store *Store) (AppInstallIntent, ExternalAuthAuthorizationPreview, ExternalAuthCallbackPreflight) {
+	t.Helper()
+
+	intent, err := store.CreateInstallIntent(context.Background(), 123, "google-calendar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkInstallIntentRequiresExternalAuth(context.Background(), 123, intent.InstallIntentRef); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := store.ReadExternalAuthDescriptor(context.Background(), 123, intent.InstallIntentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := store.PreviewExternalAuthAuthorization(context.Background(), 123, intent.InstallIntentRef, descriptor.HandoffStateRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := store.PreflightExternalAuthCallback(context.Background(), 123, intent.InstallIntentRef, ExternalAuthCallbackPreflightRequest{
+		StateRef:       preview.StateRef,
+		CallbackStatus: ExternalAuthCallbackStatusAuthorized,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent, preview, preflight
+}
+
+type fakeProviderOAuthExchangePort struct {
+	calls  int
+	input  ProviderOAuthExchangeInput
+	result ProviderOAuthExchangeResult
+	err    error
+}
+
+func (p *fakeProviderOAuthExchangePort) ExchangeProviderOAuth(_ context.Context, input ProviderOAuthExchangeInput) (ProviderOAuthExchangeResult, error) {
+	p.calls++
+	p.input = input
+	if p.err != nil {
+		return ProviderOAuthExchangeResult{}, p.err
+	}
+	return p.result, nil
+}
+
+type fakeProviderCredentialStore struct {
+	secret  ProviderCredentialSecret
+	receipt ProviderCredentialReceipt
+	err     error
+}
+
+func (s *fakeProviderCredentialStore) StoreProviderCredentialSecret(_ context.Context, secret ProviderCredentialSecret) (ProviderCredentialReceipt, error) {
+	s.secret = secret
+	if s.err != nil {
+		return ProviderCredentialReceipt{}, s.err
+	}
+	return s.receipt, nil
 }

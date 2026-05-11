@@ -31,45 +31,57 @@ var ErrAppInstallCompletionNotReady = errors.New("app install completion is not 
 var ErrAppInstallCompletionRecorded = errors.New("app install completion already recorded")
 var ErrInvalidAppInstallation = errors.New("invalid app installation")
 var ErrAppInstallationRecorded = errors.New("app installation already recorded")
+var ErrProviderOAuthExchangePortUnset = errors.New("provider oauth exchange port is not configured")
+var ErrProviderCredentialStoreUnset = errors.New("provider credential store is not configured")
+var ErrInvalidProviderOAuthExchange = errors.New("invalid provider oauth exchange")
+var ErrProviderOAuthExchangeDenied = errors.New("provider oauth exchange is denied")
+var ErrInvalidProviderCredentialSecret = errors.New("invalid provider credential secret")
+var ErrInvalidProviderCredentialReceipt = errors.New("invalid provider credential receipt")
 var ErrAppNotFound = errors.New("app not found")
 
 const (
-	InstallIntentStatusPending                   = "pending"
-	InstallIntentStatusRequiresExternalAuth      = "requires_external_auth"
-	InstallIntentStatusInstalled                 = "installed"
-	InstallIntentStatusBlocked                   = "blocked"
-	ExternalAuthAuthorizationPreviewStatus       = "preview_only"
-	ExternalAuthCallbackStatusAuthorized         = "provider_authorized"
-	ExternalAuthCallbackStatusDenied             = "provider_denied"
-	ExternalAuthCallbackPreflightAccepted        = "accepted"
-	ExternalAuthProviderExchangeQueued           = "queued"
-	ExternalAuthProviderExchangeBlocked          = "blocked"
-	ExternalAuthProviderExchangeModeSimulated    = "simulated"
-	AppInstallCompletionStatusInstalled          = "installed"
-	AppInstallCompletionStatusBlocked            = "blocked"
-	AppInstallCompletionModeSimulated            = "simulated"
-	AppInstallationStatusActive                  = "active"
-	AppInstallationModeSimulated                 = "simulated"
-	InstallProgressStatusPending                 = "pending"
-	InstallProgressStatusExternalAuthReady       = "external_auth_ready"
-	InstallProgressStatusHandoffReady            = "handoff_ready"
-	InstallProgressStatusHandoffConsumed         = "handoff_consumed"
-	InstallProgressStatusHandoffExpired          = "handoff_expired"
-	InstallProgressStatusPreviewRecorded         = "authorization_preview_recorded"
-	InstallProgressStatusCallbackPreflight       = "callback_preflight_recorded"
-	InstallProgressStatusProviderExchangeQueued  = "provider_exchange_queued"
-	InstallProgressStatusProviderExchangeBlocked = "provider_exchange_blocked"
-	InstallProgressStatusInstalled               = "installed"
-	InstallProgressStatusBlocked                 = "blocked"
-	InstallProgressStatusActive                  = "active"
-	InstallProgressActionStartExternalAuth       = "start_external_auth"
-	InstallProgressActionReadDescriptor          = "read_external_auth_descriptor"
-	InstallProgressActionPreviewAuth             = "preview_authorization"
-	InstallProgressActionRecordCallback          = "record_callback_preflight"
-	InstallProgressActionAwaitExchange           = "await_provider_exchange"
-	InstallProgressActionNone                    = "none"
-	InstallProgressActionCreateNewIntent         = "create_new_install_intent"
-	InstallProgressActionRestartExternalAuth     = "restart_external_auth"
+	InstallIntentStatusPending                    = "pending"
+	InstallIntentStatusRequiresExternalAuth       = "requires_external_auth"
+	InstallIntentStatusInstalled                  = "installed"
+	InstallIntentStatusBlocked                    = "blocked"
+	ExternalAuthAuthorizationPreviewStatus        = "preview_only"
+	ExternalAuthCallbackStatusAuthorized          = "provider_authorized"
+	ExternalAuthCallbackStatusDenied              = "provider_denied"
+	ExternalAuthCallbackPreflightAccepted         = "accepted"
+	ExternalAuthProviderExchangeQueued            = "queued"
+	ExternalAuthProviderExchangeBlocked           = "blocked"
+	ExternalAuthProviderExchangeCredentialReady   = "credential_ready"
+	ExternalAuthProviderExchangeModeSimulated     = "simulated"
+	ExternalAuthProviderExchangeModeProviderOAuth = "provider_oauth"
+	AppInstallCompletionStatusInstalled           = "installed"
+	AppInstallCompletionStatusBlocked             = "blocked"
+	AppInstallCompletionModeSimulated             = "simulated"
+	AppInstallCompletionModeProviderOAuth         = "provider_oauth"
+	AppInstallationStatusActive                   = "active"
+	AppInstallationModeSimulated                  = "simulated"
+	AppInstallationModeProviderOAuth              = "provider_oauth"
+	InstallProgressStatusPending                  = "pending"
+	InstallProgressStatusExternalAuthReady        = "external_auth_ready"
+	InstallProgressStatusHandoffReady             = "handoff_ready"
+	InstallProgressStatusHandoffConsumed          = "handoff_consumed"
+	InstallProgressStatusHandoffExpired           = "handoff_expired"
+	InstallProgressStatusPreviewRecorded          = "authorization_preview_recorded"
+	InstallProgressStatusCallbackPreflight        = "callback_preflight_recorded"
+	InstallProgressStatusProviderExchangeQueued   = "provider_exchange_queued"
+	InstallProgressStatusProviderExchangeBlocked  = "provider_exchange_blocked"
+	InstallProgressStatusProviderCredentialReady  = "provider_credential_ready"
+	InstallProgressStatusInstalled                = "installed"
+	InstallProgressStatusBlocked                  = "blocked"
+	InstallProgressStatusActive                   = "active"
+	InstallProgressActionStartExternalAuth        = "start_external_auth"
+	InstallProgressActionReadDescriptor           = "read_external_auth_descriptor"
+	InstallProgressActionPreviewAuth              = "preview_authorization"
+	InstallProgressActionRecordCallback           = "record_callback_preflight"
+	InstallProgressActionAwaitExchange            = "await_provider_exchange"
+	InstallProgressActionCompleteInstall          = "complete_install"
+	InstallProgressActionNone                     = "none"
+	InstallProgressActionCreateNewIntent          = "create_new_install_intent"
+	InstallProgressActionRestartExternalAuth      = "restart_external_auth"
 )
 
 type AppMetadata struct {
@@ -109,6 +121,19 @@ type ExternalAuthCallbackPreflightRequest struct {
 type ExternalAuthProviderExchangeRequest struct {
 	StateRef             string `json:"stateRef"`
 	CallbackPreflightRef string `json:"callbackPreflightRef"`
+}
+
+type ProviderOAuthExchangeRequest struct {
+	StateRef             string
+	CallbackPreflightRef string
+	AuthorizationCode    string
+	RedirectURI          string
+}
+
+type ProviderOAuthCallbackRequest struct {
+	StateRef          string
+	AuthorizationCode string
+	RedirectURI       string
 }
 
 type AppInstallCompletionRequest struct {
@@ -261,11 +286,80 @@ type AppInstallProgress struct {
 	UserID                          int    `json:"-"`
 }
 
+type ProviderOAuthExchangeInput struct {
+	UserID               int
+	InstallIntentRef     string
+	AppSlug              string
+	ProviderSlug         string
+	StateRef             string
+	CallbackPreflightRef string
+	AuthorizationCode    string
+	RedirectURI          string
+	RequestedScopes      []string
+}
+
+type ProviderOAuthExchangeResult struct {
+	AccountRef   string
+	AccountLabel string
+	Scopes       []string
+	TokenPayload ProviderTokenPayload
+}
+
+type ProviderTokenPayload struct {
+	AccessToken         string
+	RefreshToken        string
+	TokenType           string
+	ExpiresAt           string
+	RawProviderResponse []byte
+}
+
+type ProviderCredentialSecret struct {
+	UserID       int
+	AppSlug      string
+	AppCategory  string
+	ProviderSlug string
+	AccountRef   string
+	AccountLabel string
+	Scopes       []string
+	TokenPayload ProviderTokenPayload
+}
+
+type ProviderCredentialReceipt struct {
+	CredentialRef string
+	AccountRef    string
+	AccountLabel  string
+	Status        string
+	Scopes        []string
+}
+
+type ProviderOAuthCallbackResult struct {
+	InstallIntentRef     string
+	AppSlug              string
+	ProviderSlug         string
+	CallbackPreflightRef string
+	ProviderExchangeRef  string
+	ExchangeStatus       string
+	ExchangeMode         string
+	CredentialStored     bool
+	RecordedAt           string
+}
+
+type ProviderOAuthExchangePort interface {
+	ExchangeProviderOAuth(ctx context.Context, input ProviderOAuthExchangeInput) (ProviderOAuthExchangeResult, error)
+}
+
+type ProviderCredentialStore interface {
+	StoreProviderCredentialSecret(ctx context.Context, secret ProviderCredentialSecret) (ProviderCredentialReceipt, error)
+}
+
 type Repository interface {
 	ReadAppCatalog(ctx context.Context) ([]AppMetadata, error)
 	ReadInstallIntents(ctx context.Context, userID int) ([]AppInstallIntent, error)
 	ReadAppInstallations(ctx context.Context, userID int) ([]AppInstallation, error)
 	ReadInstallProgress(ctx context.Context, userID int, installIntentRef string, observedAt time.Time) (AppInstallProgress, error)
+	ReadExternalAuthCallbackPreflight(ctx context.Context, userID int, installIntentRef string, stateRef string, callbackPreflightRef string) (ExternalAuthCallbackPreflight, error)
+	ReadExternalAuthCallbackPreflightByState(ctx context.Context, stateRef string) (ExternalAuthCallbackPreflight, error)
+	ReadExternalAuthProviderExchangeByPreflight(ctx context.Context, userID int, installIntentRef string, callbackPreflightRef string) (ExternalAuthProviderExchange, error)
 	SaveAppMetadata(ctx context.Context, app AppMetadata) (AppMetadata, error)
 	SaveInstallIntent(ctx context.Context, intent AppInstallIntent) (AppInstallIntent, error)
 	MarkInstallIntentRequiresExternalAuth(ctx context.Context, userID int, installIntentRef string) (AppInstallIntent, error)
@@ -289,6 +383,8 @@ type Store struct {
 	providerExchanges     map[string]ExternalAuthProviderExchange
 	installCompletions    map[string]AppInstallCompletion
 	appInstallations      map[string]AppInstallation
+	oauthExchangePort     ProviderOAuthExchangePort
+	credentialStore       ProviderCredentialStore
 	now                   func() time.Time
 	loaded                bool
 }
@@ -306,6 +402,18 @@ func WithClock(now func() time.Time) StoreOption {
 		if now != nil {
 			s.now = now
 		}
+	}
+}
+
+func WithProviderOAuthExchangePort(port ProviderOAuthExchangePort) StoreOption {
+	return func(s *Store) {
+		s.oauthExchangePort = port
+	}
+}
+
+func WithProviderCredentialStore(store ProviderCredentialStore) StoreOption {
+	return func(s *Store) {
+		s.credentialStore = store
 	}
 }
 
@@ -669,6 +777,177 @@ func (s *Store) ExchangeExternalAuthProvider(ctx context.Context, userID int, in
 	return exchange, nil
 }
 
+func (s *Store) ExchangeExternalAuthProviderOAuth(ctx context.Context, userID int, installIntentRef string, request ProviderOAuthExchangeRequest) (ExternalAuthProviderExchange, ProviderCredentialReceipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stateRef := strings.TrimSpace(request.StateRef)
+	callbackPreflightRef := strings.TrimSpace(request.CallbackPreflightRef)
+	authorizationCode := strings.TrimSpace(request.AuthorizationCode)
+	if userID <= 0 ||
+		strings.TrimSpace(installIntentRef) == "" ||
+		stateRef == "" ||
+		callbackPreflightRef == "" ||
+		authorizationCode == "" {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrInvalidProviderOAuthExchange
+	}
+	if s.oauthExchangePort == nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrProviderOAuthExchangePortUnset
+	}
+	if s.credentialStore == nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrProviderCredentialStoreUnset
+	}
+	if err := s.ensureLoadedLocked(ctx); err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+
+	intent, ok, err := s.findInstallIntentLocked(ctx, userID, installIntentRef)
+	if err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+	if !ok {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrInstallIntentNotFound
+	}
+	if intent.Status != InstallIntentStatusRequiresExternalAuth {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrInstallIntentNotReady
+	}
+	app, ok := s.findAppLocked(intent.AppSlug)
+	if !ok {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrAppNotFound
+	}
+
+	preflight, err := s.readExternalAuthCallbackPreflightLocked(ctx, userID, installIntentRef, stateRef, callbackPreflightRef)
+	if err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+	if preflight.CallbackStatus != ExternalAuthCallbackStatusAuthorized {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrProviderOAuthExchangeDenied
+	}
+
+	return s.exchangeExternalAuthProviderOAuthLocked(ctx, intent, app, preflight, authorizationCode, strings.TrimSpace(request.RedirectURI))
+}
+
+func (s *Store) HandleProviderOAuthCallback(ctx context.Context, request ProviderOAuthCallbackRequest) (ProviderOAuthCallbackResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stateRef := strings.TrimSpace(request.StateRef)
+	authorizationCode := strings.TrimSpace(request.AuthorizationCode)
+	if stateRef == "" || authorizationCode == "" {
+		return ProviderOAuthCallbackResult{}, ErrInvalidProviderOAuthExchange
+	}
+	if s.oauthExchangePort == nil {
+		return ProviderOAuthCallbackResult{}, ErrProviderOAuthExchangePortUnset
+	}
+	if s.credentialStore == nil {
+		return ProviderOAuthCallbackResult{}, ErrProviderCredentialStoreUnset
+	}
+	if err := s.ensureLoadedLocked(ctx); err != nil {
+		return ProviderOAuthCallbackResult{}, err
+	}
+
+	preflight, err := s.readExternalAuthCallbackPreflightByStateLocked(ctx, stateRef)
+	if err != nil {
+		return ProviderOAuthCallbackResult{}, err
+	}
+	if preflight.CallbackStatus != ExternalAuthCallbackStatusAuthorized {
+		return ProviderOAuthCallbackResult{}, ErrProviderOAuthExchangeDenied
+	}
+	intent, ok, err := s.findInstallIntentLocked(ctx, preflight.UserID, preflight.InstallIntentRef)
+	if err != nil {
+		return ProviderOAuthCallbackResult{}, err
+	}
+	if !ok {
+		return ProviderOAuthCallbackResult{}, ErrInstallIntentNotFound
+	}
+	if intent.Status != InstallIntentStatusRequiresExternalAuth {
+		return ProviderOAuthCallbackResult{}, ErrInstallIntentNotReady
+	}
+	app, ok := s.findAppLocked(intent.AppSlug)
+	if !ok {
+		return ProviderOAuthCallbackResult{}, ErrAppNotFound
+	}
+
+	exchange, _, err := s.exchangeExternalAuthProviderOAuthLocked(ctx, intent, app, preflight, authorizationCode, strings.TrimSpace(request.RedirectURI))
+	if err != nil {
+		return ProviderOAuthCallbackResult{}, err
+	}
+	return ProviderOAuthCallbackResult{
+		InstallIntentRef:     exchange.InstallIntentRef,
+		AppSlug:              exchange.AppSlug,
+		ProviderSlug:         exchange.ProviderSlug,
+		CallbackPreflightRef: exchange.CallbackPreflightRef,
+		ProviderExchangeRef:  exchange.ProviderExchangeRef,
+		ExchangeStatus:       exchange.ExchangeStatus,
+		ExchangeMode:         exchange.ExchangeMode,
+		CredentialStored:     true,
+		RecordedAt:           exchange.RecordedAt,
+	}, nil
+}
+
+func (s *Store) exchangeExternalAuthProviderOAuthLocked(ctx context.Context, intent AppInstallIntent, app AppMetadata, preflight ExternalAuthCallbackPreflight, authorizationCode string, redirectURI string) (ExternalAuthProviderExchange, ProviderCredentialReceipt, error) {
+	if strings.TrimSpace(authorizationCode) == "" {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrInvalidProviderOAuthExchange
+	}
+	recorded, err := s.hasExternalAuthProviderExchangeByPreflightLocked(ctx, intent.UserID, intent.InstallIntentRef, preflight.CallbackPreflightRef)
+	if err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+	if recorded {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, ErrExternalAuthProviderExchangeRecorded
+	}
+
+	input := ProviderOAuthExchangeInput{
+		UserID:               intent.UserID,
+		InstallIntentRef:     intent.InstallIntentRef,
+		AppSlug:              intent.AppSlug,
+		ProviderSlug:         app.Provider,
+		StateRef:             preflight.StateRef,
+		CallbackPreflightRef: preflight.CallbackPreflightRef,
+		AuthorizationCode:    authorizationCode,
+		RedirectURI:          redirectURI,
+		RequestedScopes:      append([]string(nil), app.Capabilities...),
+	}
+	result, err := s.oauthExchangePort.ExchangeProviderOAuth(ctx, input)
+	if err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+	if err := validateProviderOAuthExchangeResult(result); err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+
+	secret := ProviderCredentialSecret{
+		UserID:       intent.UserID,
+		AppSlug:      intent.AppSlug,
+		AppCategory:  app.Category,
+		ProviderSlug: app.Provider,
+		AccountRef:   result.AccountRef,
+		AccountLabel: result.AccountLabel,
+		Scopes:       append([]string(nil), result.Scopes...),
+		TokenPayload: cloneProviderTokenPayload(result.TokenPayload),
+	}
+	receipt, err := s.credentialStore.StoreProviderCredentialSecret(ctx, secret)
+	if err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+	if err := validateProviderCredentialReceipt(receipt, result); err != nil {
+		return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+	}
+	receipt.Scopes = append([]string(nil), receipt.Scopes...)
+
+	now := s.now()
+	exchange := newProviderOAuthCredentialReadyExchange(intent, app, preflight, now)
+	if s.repo != nil {
+		saved, err := s.repo.SaveExternalAuthProviderExchange(ctx, exchange, now)
+		if err != nil {
+			return ExternalAuthProviderExchange{}, ProviderCredentialReceipt{}, err
+		}
+		return saved, receipt, nil
+	}
+	s.providerExchanges[preflight.CallbackPreflightRef] = exchange
+	return exchange, receipt, nil
+}
+
 func (s *Store) CompleteAppInstall(ctx context.Context, userID int, installIntentRef string, request AppInstallCompletionRequest) (AppInstallCompletion, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -977,6 +1256,29 @@ func (s *Store) findExternalAuthCallbackPreflightLocked(userID int, installInten
 	return ExternalAuthCallbackPreflight{}, false
 }
 
+func (s *Store) readExternalAuthCallbackPreflightLocked(ctx context.Context, userID int, installIntentRef string, stateRef string, callbackPreflightRef string) (ExternalAuthCallbackPreflight, error) {
+	if s.repo != nil {
+		return s.repo.ReadExternalAuthCallbackPreflight(ctx, userID, installIntentRef, stateRef, callbackPreflightRef)
+	}
+	preflight, ok := s.findExternalAuthCallbackPreflightLocked(userID, installIntentRef, stateRef, callbackPreflightRef)
+	if !ok {
+		return ExternalAuthCallbackPreflight{}, ErrExternalAuthCallbackPreflightNotFound
+	}
+	return preflight, nil
+}
+
+func (s *Store) readExternalAuthCallbackPreflightByStateLocked(ctx context.Context, stateRef string) (ExternalAuthCallbackPreflight, error) {
+	if s.repo != nil {
+		return s.repo.ReadExternalAuthCallbackPreflightByState(ctx, stateRef)
+	}
+	for _, preflight := range s.callbackPreflights {
+		if preflight.StateRef == stateRef {
+			return preflight, nil
+		}
+	}
+	return ExternalAuthCallbackPreflight{}, ErrExternalAuthCallbackPreflightNotFound
+}
+
 func (s *Store) findExternalAuthProviderExchangeLocked(userID int, installIntentRef string, providerExchangeRef string) (ExternalAuthProviderExchange, bool) {
 	for _, exchange := range s.providerExchanges {
 		if exchange.UserID == userID &&
@@ -986,6 +1288,27 @@ func (s *Store) findExternalAuthProviderExchangeLocked(userID int, installIntent
 		}
 	}
 	return ExternalAuthProviderExchange{}, false
+}
+
+func (s *Store) hasExternalAuthProviderExchangeByPreflightLocked(ctx context.Context, userID int, installIntentRef string, callbackPreflightRef string) (bool, error) {
+	if s.repo != nil {
+		_, err := s.repo.ReadExternalAuthProviderExchangeByPreflight(ctx, userID, installIntentRef, callbackPreflightRef)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, ErrExternalAuthProviderExchangeNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, exchange := range s.providerExchanges {
+		if exchange.UserID == userID &&
+			exchange.InstallIntentRef == installIntentRef &&
+			exchange.CallbackPreflightRef == callbackPreflightRef {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Store) findAppInstallCompletionLocked(userID int, installIntentRef string, installCompletionRef string) (AppInstallCompletion, bool) {
@@ -1102,6 +1425,71 @@ func isValidExternalAuthCallbackStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func isValidExternalAuthProviderExchangeStatus(status string) bool {
+	switch status {
+	case ExternalAuthProviderExchangeQueued, ExternalAuthProviderExchangeBlocked, ExternalAuthProviderExchangeCredentialReady:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidExternalAuthProviderExchangeMode(mode string) bool {
+	switch mode {
+	case ExternalAuthProviderExchangeModeSimulated, ExternalAuthProviderExchangeModeProviderOAuth:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidAppInstallCompletionMode(mode string) bool {
+	switch mode {
+	case AppInstallCompletionModeSimulated, AppInstallCompletionModeProviderOAuth:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidAppInstallationMode(mode string) bool {
+	switch mode {
+	case AppInstallationModeSimulated, AppInstallationModeProviderOAuth:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateProviderOAuthExchangeResult(result ProviderOAuthExchangeResult) error {
+	if strings.TrimSpace(result.AccountRef) == "" ||
+		strings.TrimSpace(result.AccountLabel) == "" ||
+		len(result.Scopes) == 0 ||
+		strings.TrimSpace(result.TokenPayload.AccessToken) == "" ||
+		strings.TrimSpace(result.TokenPayload.RefreshToken) == "" {
+		return ErrInvalidProviderOAuthExchange
+	}
+	return nil
+}
+
+func validateProviderCredentialReceipt(receipt ProviderCredentialReceipt, result ProviderOAuthExchangeResult) error {
+	if strings.TrimSpace(receipt.CredentialRef) == "" ||
+		strings.TrimSpace(receipt.AccountRef) == "" ||
+		strings.TrimSpace(receipt.AccountLabel) == "" ||
+		strings.TrimSpace(receipt.Status) == "" ||
+		len(receipt.Scopes) == 0 ||
+		receipt.AccountRef != result.AccountRef ||
+		receipt.AccountLabel != result.AccountLabel {
+		return ErrInvalidProviderCredentialReceipt
+	}
+	return nil
+}
+
+func cloneProviderTokenPayload(payload ProviderTokenPayload) ProviderTokenPayload {
+	payload.RawProviderResponse = append([]byte(nil), payload.RawProviderResponse...)
+	return payload
 }
 
 func optionalExternalAuthSession(session ExternalAuthSession, ok bool) *ExternalAuthSession {
@@ -1257,6 +1645,10 @@ func newAppInstallProgress(intent AppInstallIntent, app AppMetadata, session *Ex
 			progress.ProgressStatus = InstallProgressStatusProviderExchangeBlocked
 			progress.NextAction = InstallProgressActionRestartExternalAuth
 		}
+		if exchange.ExchangeStatus == ExternalAuthProviderExchangeCredentialReady {
+			progress.ProgressStatus = InstallProgressStatusProviderCredentialReady
+			progress.NextAction = InstallProgressActionCompleteInstall
+		}
 		progress.UpdatedAt = laterWireTime(progress.UpdatedAt, exchange.UpdatedAt)
 	}
 	if completion != nil {
@@ -1367,11 +1759,33 @@ func newExternalAuthProviderExchangeRequest(intent AppInstallIntent, app AppMeta
 	}
 }
 
+func newProviderOAuthCredentialReadyExchange(intent AppInstallIntent, app AppMetadata, preflight ExternalAuthCallbackPreflight, recordedAt time.Time) ExternalAuthProviderExchange {
+	now := wireTime(recordedAt)
+	return ExternalAuthProviderExchange{
+		ProviderExchangeRef:  newProviderExchangeRef(),
+		InstallIntentRef:     intent.InstallIntentRef,
+		AppSlug:              intent.AppSlug,
+		ProviderSlug:         app.Provider,
+		StateRef:             preflight.StateRef,
+		CallbackPreflightRef: preflight.CallbackPreflightRef,
+		ExchangeStatus:       ExternalAuthProviderExchangeCredentialReady,
+		ExchangeMode:         ExternalAuthProviderExchangeModeProviderOAuth,
+		RecordedAt:           now,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+		UserID:               intent.UserID,
+	}
+}
+
 func newAppInstallCompletion(intent AppInstallIntent, app AppMetadata, exchange ExternalAuthProviderExchange, completedAt time.Time) AppInstallCompletion {
 	now := wireTime(completedAt)
 	status := AppInstallCompletionStatusInstalled
 	if exchange.ExchangeStatus == ExternalAuthProviderExchangeBlocked {
 		status = AppInstallCompletionStatusBlocked
+	}
+	mode := AppInstallCompletionModeSimulated
+	if exchange.ExchangeMode == ExternalAuthProviderExchangeModeProviderOAuth {
+		mode = AppInstallCompletionModeProviderOAuth
 	}
 	return AppInstallCompletion{
 		InstallCompletionRef: newInstallCompletionRef(),
@@ -1380,7 +1794,7 @@ func newAppInstallCompletion(intent AppInstallIntent, app AppMetadata, exchange 
 		ProviderSlug:         app.Provider,
 		ProviderExchangeRef:  exchange.ProviderExchangeRef,
 		CompletionStatus:     status,
-		CompletionMode:       AppInstallCompletionModeSimulated,
+		CompletionMode:       mode,
 		CompletedAt:          now,
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -1396,7 +1810,6 @@ func newAppInstallCompletionRequest(intent AppInstallIntent, app AppMetadata, pr
 		AppSlug:              intent.AppSlug,
 		ProviderSlug:         app.Provider,
 		ProviderExchangeRef:  providerExchangeRef,
-		CompletionMode:       AppInstallCompletionModeSimulated,
 		CompletedAt:          now,
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -1406,6 +1819,10 @@ func newAppInstallCompletionRequest(intent AppInstallIntent, app AppMetadata, pr
 
 func newAppInstallation(intent AppInstallIntent, app AppMetadata, completion AppInstallCompletion, activatedAt time.Time) AppInstallation {
 	now := wireTime(activatedAt)
+	mode := AppInstallationModeSimulated
+	if completion.CompletionMode == AppInstallCompletionModeProviderOAuth {
+		mode = AppInstallationModeProviderOAuth
+	}
 	return AppInstallation{
 		AppInstallationRef:   newAppInstallationRef(),
 		InstallIntentRef:     intent.InstallIntentRef,
@@ -1417,7 +1834,7 @@ func newAppInstallation(intent AppInstallIntent, app AppMetadata, completion App
 		AuthType:             app.AuthType,
 		Capabilities:         append([]string(nil), app.Capabilities...),
 		ActivationStatus:     AppInstallationStatusActive,
-		ActivationMode:       AppInstallationModeSimulated,
+		ActivationMode:       mode,
 		ActivatedAt:          now,
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -1438,7 +1855,6 @@ func newAppInstallationRequest(intent AppInstallIntent, app AppMetadata, install
 		AuthType:             app.AuthType,
 		Capabilities:         append([]string(nil), app.Capabilities...),
 		ActivationStatus:     AppInstallationStatusActive,
-		ActivationMode:       AppInstallationModeSimulated,
 		ActivatedAt:          now,
 		CreatedAt:            now,
 		UpdatedAt:            now,

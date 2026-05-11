@@ -405,6 +405,124 @@ func TestPostgresRepositoryRoundTripInstallIntent(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositoryRoundTripProviderOAuthCallbackModes(t *testing.T) {
+	pool := testPostgresPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := NewPostgresRepository(pool)
+	slug := "app-install-provider-oauth-repository-fixture"
+	intentRef := "app-intent-provider-oauth-repository-fixture"
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = pool.Exec(cleanupCtx, `delete from integration_app_install_intents where install_intent_ref = $1`, intentRef)
+		_, _ = pool.Exec(cleanupCtx, `delete from integration_app_catalog where app_slug = $1`, slug)
+	})
+
+	if _, err := repo.SaveAppMetadata(ctx, AppMetadata{
+		AppSlug:      slug,
+		Category:     "calendar",
+		Provider:     "provider-oauth-provider-fixture",
+		Name:         "Provider OAuth Fixture",
+		Description:  "Provider OAuth app catalog fixture.",
+		AuthType:     "oauth",
+		Capabilities: []string{"calendar.read"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SaveInstallIntent(ctx, AppInstallIntent{
+		InstallIntentRef: intentRef,
+		UserID:           123,
+		AppSlug:          slug,
+		Status:           InstallIntentStatusPending,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.MarkInstallIntentRequiresExternalAuth(ctx, 123, intentRef); err != nil {
+		t.Fatal(err)
+	}
+
+	oauthPort := &fakeProviderOAuthExchangePort{
+		result: ProviderOAuthExchangeResult{
+			AccountRef:   "provider-oauth-account-repository-fixture",
+			AccountLabel: "provider-oauth@example.test",
+			Scopes:       []string{"calendar.read"},
+			TokenPayload: ProviderTokenPayload{
+				AccessToken:  "provider-access-token-secret-fixture",
+				RefreshToken: "provider-refresh-token-secret-fixture",
+			},
+		},
+	}
+	store := NewStoreWithRepository(
+		repo,
+		WithProviderOAuthExchangePort(oauthPort),
+		WithProviderCredentialStore(&fakeProviderCredentialStore{
+			receipt: ProviderCredentialReceipt{
+				CredentialRef: "credential-provider-oauth-repository-fixture",
+				AccountRef:    "provider-oauth-account-repository-fixture",
+				AccountLabel:  "provider-oauth@example.test",
+				Status:        "active",
+				Scopes:        []string{"calendar.read"},
+			},
+		}),
+	)
+	descriptor, err := store.ReadExternalAuthDescriptor(ctx, 123, intentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := store.PreflightExternalAuthCallback(ctx, 123, intentRef, ExternalAuthCallbackPreflightRequest{
+		StateRef:       descriptor.HandoffStateRef,
+		CallbackStatus: ExternalAuthCallbackStatusAuthorized,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.HandleProviderOAuthCallback(ctx, ProviderOAuthCallbackRequest{
+		StateRef:          descriptor.HandoffStateRef,
+		AuthorizationCode: "provider-code-secret-fixture",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CallbackPreflightRef != preflight.CallbackPreflightRef {
+		t.Fatalf("callback preflight ref = %q", result.CallbackPreflightRef)
+	}
+	if result.ExchangeStatus != ExternalAuthProviderExchangeCredentialReady {
+		t.Fatalf("provider exchange status = %q", result.ExchangeStatus)
+	}
+	if result.ExchangeMode != ExternalAuthProviderExchangeModeProviderOAuth {
+		t.Fatalf("provider exchange mode = %q", result.ExchangeMode)
+	}
+	progress, err := store.ReadInstallProgress(ctx, 123, intentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progress.ProgressStatus != InstallProgressStatusProviderCredentialReady {
+		t.Fatalf("provider credential progress status = %q", progress.ProgressStatus)
+	}
+
+	completion, err := store.CompleteAppInstall(ctx, 123, intentRef, AppInstallCompletionRequest{
+		ProviderExchangeRef: result.ProviderExchangeRef,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completion.CompletionMode != AppInstallCompletionModeProviderOAuth {
+		t.Fatalf("completion mode = %q", completion.CompletionMode)
+	}
+	installation, err := store.ActivateAppInstallation(ctx, 123, intentRef, AppInstallationActivationRequest{
+		InstallCompletionRef: completion.InstallCompletionRef,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installation.ActivationMode != AppInstallationModeProviderOAuth {
+		t.Fatalf("activation mode = %q", installation.ActivationMode)
+	}
+}
+
 func findInstallIntent(items []AppInstallIntent, installIntentRef string) (AppInstallIntent, bool) {
 	for _, item := range items {
 		if item.InstallIntentRef == installIntentRef {
