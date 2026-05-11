@@ -131,7 +131,10 @@ func main() {
 				apps.WithProviderOAuthExchangePort(apps.NewFixtureProviderOAuthExchangePort()),
 				apps.WithProviderCredentialStore(credentials.NewProviderCredentialStore(
 					credentialRepository,
-					credentials.NewInMemoryProviderTokenSecretStore(),
+					credentials.NewPostgresProviderTokenSecretStore(
+						pool,
+						credentials.NewFixtureProviderTokenSealer(),
+					),
 				)),
 			),
 		))

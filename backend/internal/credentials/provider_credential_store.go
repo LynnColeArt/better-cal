@@ -15,7 +15,7 @@ import (
 var ErrProviderTokenSecretStoreUnset = errors.New("provider token secret store is not configured")
 
 type ProviderTokenSecretStore interface {
-	StoreProviderTokenPayload(ctx context.Context, secret apps.ProviderCredentialSecret) error
+	StoreProviderTokenPayload(ctx context.Context, credentialRef string, secret apps.ProviderCredentialSecret) error
 }
 
 type ProviderCredentialStore struct {
@@ -53,7 +53,7 @@ func (s *ProviderCredentialStore) StoreProviderCredentialSecret(ctx context.Cont
 		}
 	}
 
-	if err := s.secretStore.StoreProviderTokenPayload(ctx, secret); err != nil {
+	if err := s.secretStore.StoreProviderTokenPayload(ctx, credentialRef, secret); err != nil {
 		return apps.ProviderCredentialReceipt{}, err
 	}
 
@@ -90,9 +90,12 @@ func NewInMemoryProviderTokenSecretStore() *InMemoryProviderTokenSecretStore {
 	}
 }
 
-func (s *InMemoryProviderTokenSecretStore) StoreProviderTokenPayload(_ context.Context, secret apps.ProviderCredentialSecret) error {
+func (s *InMemoryProviderTokenSecretStore) StoreProviderTokenPayload(_ context.Context, credentialRef string, secret apps.ProviderCredentialSecret) error {
 	if s == nil {
 		return ErrProviderTokenSecretStoreUnset
+	}
+	if strings.TrimSpace(credentialRef) == "" {
+		return ErrInvalidCredentialMetadata
 	}
 	if err := validateProviderCredentialSecret(secret); err != nil {
 		return err
@@ -102,7 +105,7 @@ func (s *InMemoryProviderTokenSecretStore) StoreProviderTokenPayload(_ context.C
 
 	secret.Scopes = append([]string(nil), secret.Scopes...)
 	secret.TokenPayload.RawProviderResponse = append([]byte(nil), secret.TokenPayload.RawProviderResponse...)
-	s.secrets[providerCredentialSecretKey(secret)] = secret
+	s.secrets[credentialRef] = secret
 	return nil
 }
 

@@ -1,15 +1,15 @@
 # Current State
 
-Last updated: 2026-05-10 23:10 CDT, after running the provider-OAuth callback path against live Compose Postgres.
+Last updated: 2026-05-10 23:30 CDT, after replacing the in-memory provider token sink with a sealed Postgres token store.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/better-cal`
 - Branch: `main`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
-- Intended commit message for this follow-up: `test: harden provider oauth postgres smoke`
+- Intended commit message for this follow-up: `feat: persist sealed provider token secrets`
 
-The remote `main` already contains `f231e17 feat: wire provider oauth callback handoff`. The current working tree contains a live-Postgres smoke hardening follow-up. It still has not introduced a public provider-code route.
+The remote `main` already contains `1ef94db test: harden provider oauth postgres smoke`. The current working tree contains the durable sealed-token-store follow-up. It still has not introduced a public provider-code route.
 
 ## Slice Purpose
 
@@ -38,23 +38,26 @@ Fixture provider and credential adapters:
 
 - [fixture_provider_oauth.go](/home/lynn/projects/better-cal/backend/internal/apps/fixture_provider_oauth.go)
 - [provider_credential_store.go](/home/lynn/projects/better-cal/backend/internal/credentials/provider_credential_store.go)
+- [provider_token_secret_store.go](/home/lynn/projects/better-cal/backend/internal/credentials/provider_token_secret_store.go)
 - [main.go](/home/lynn/projects/better-cal/backend/cmd/api/main.go)
 - Adds a fixture provider-OAuth exchange port for non-public callback/worker flows.
 - Adds a credential-store adapter that writes only non-secret credential metadata through the existing credential repository.
-- Adds a dedicated token secret sink so provider token payload handling stays behind an internal seam rather than in app-install tables or public DTOs.
-- Wires the fixture provider exchange and fixture token secret sink into the API process when Postgres is enabled.
+- Adds a Postgres provider token secret store that seals provider token payloads with an AES-GCM envelope and records only key refs, ciphertext, and ciphertext fingerprints.
+- Wires the fixture provider exchange and sealed Postgres token secret store into the API process when Postgres is enabled.
 
 Postgres app-install mode support:
 
 - [postgres_repository.go](/home/lynn/projects/better-cal/backend/internal/apps/postgres_repository.go)
 - [0031_provider_oauth_app_install_modes.sql](/home/lynn/projects/better-cal/backend/internal/db/migrations/0031_provider_oauth_app_install_modes.sql)
 - [0032_provider_oauth_constraint_names.sql](/home/lynn/projects/better-cal/backend/internal/db/migrations/0032_provider_oauth_constraint_names.sql)
+- [0033_integration_provider_token_secrets.sql](/home/lynn/projects/better-cal/backend/internal/db/migrations/0033_integration_provider_token_secrets.sql)
 - Allows provider exchange status `credential_ready`.
 - Allows provider exchange, completion, and activation mode `provider_oauth` alongside `simulated`.
 - Adds a repository read for callback preflight ownership/state validation before internal OAuth exchange work.
 - Adds repository reads by opaque handoff state and callback preflight so replay can be rejected before provider/credential side effects.
 - Adds a compatibility migration for the historical/truncated provider-exchange check-constraint name that live Compose Postgres still had after the first provider-OAuth migration.
 - Narrows the older install-intent Postgres test so it asserts the fixture installation is present without assuming a long-lived Compose database has no other user-123 installed apps.
+- Adds `integration_provider_token_secrets` as a private sealed-payload table keyed by user and credential ref, with no raw access-token, refresh-token, or provider-response columns.
 
 ## Verification
 
@@ -72,6 +75,7 @@ docker compose up --build -d postgres
 docker compose exec -T postgres pg_isready -U better_cal -d better_cal
 cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/better-cal-go-build go test ./internal/apps -run TestPostgresRepositoryRoundTripProviderOAuthCallbackModes -count=1 -v
 cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/better-cal-go-build go test ./internal/apps -count=1 -v
+cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/better-cal-go-build go test ./internal/credentials -run 'TestPostgresProviderTokenSecret|TestPostgresProviderOAuthCallbackStoresSealedTokenSecret' -count=1 -v
 cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/better-cal-go-build go test ./internal/db ./internal/apps ./internal/auth ./internal/authz ./internal/booking ./internal/calendar ./internal/calendars ./internal/credentials ./internal/email ./internal/httpapi ./internal/slots
 ```
 
@@ -79,6 +83,6 @@ cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127
 
 The next useful slice is to make the callback path durable against real provider behavior:
 
-1. replace the in-memory fixture token sink with an encrypted token secret repository;
-2. add provider callback signature/state fixtures before exposing any compatibility HTTP callback route;
+1. add provider callback signature/state fixtures before exposing any compatibility HTTP callback route;
+2. move the fixture token sealer behind explicit runtime key configuration or a real key-management boundary;
 3. add a dedicated smoke command/script for the provider-OAuth callback path if this starts being run outside `go test`.

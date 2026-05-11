@@ -133,6 +133,6 @@ type failingProviderTokenSecretStore struct {
 	err error
 }
 
-func (s failingProviderTokenSecretStore) StoreProviderTokenPayload(context.Context, apps.ProviderCredentialSecret) error {
+func (s failingProviderTokenSecretStore) StoreProviderTokenPayload(context.Context, string, apps.ProviderCredentialSecret) error {
 	return s.err
 }
