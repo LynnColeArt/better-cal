@@ -378,14 +378,18 @@ func TestPostgresRepositoryRoundTripInstallIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(installations) != 1 || installations[0].AppInstallationRef != installation.AppInstallationRef {
+	foundInstallation, ok := findAppInstallation(installations, installation.AppInstallationRef)
+	if !ok {
 		t.Fatalf("app installations = %#v", installations)
+	}
+	if foundInstallation.InstallIntentRef != intentRef {
+		t.Fatalf("found installation intent ref = %q", foundInstallation.InstallIntentRef)
 	}
 	otherInstallations, err := store.ReadAppInstallations(ctx, 999)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(otherInstallations) != 0 {
+	if _, ok := findAppInstallation(otherInstallations, installation.AppInstallationRef); ok {
 		t.Fatalf("wrong-user app installations leaked: %#v", otherInstallations)
 	}
 	progress, err = store.ReadInstallProgress(ctx, 123, intentRef)
@@ -530,6 +534,15 @@ func findInstallIntent(items []AppInstallIntent, installIntentRef string) (AppIn
 		}
 	}
 	return AppInstallIntent{}, false
+}
+
+func findAppInstallation(items []AppInstallation, appInstallationRef string) (AppInstallation, bool) {
+	for _, item := range items {
+		if item.AppInstallationRef == appInstallationRef {
+			return item, true
+		}
+	}
+	return AppInstallation{}, false
 }
 
 func TestPostgresAppCatalogTableHasNoSecretColumns(t *testing.T) {

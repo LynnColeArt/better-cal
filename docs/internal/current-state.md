@@ -1,15 +1,15 @@
 # Current State
 
-Last updated: 2026-05-10 12:45 CDT, after wiring the provider-OAuth callback adapter and fixture credential store.
+Last updated: 2026-05-10 23:10 CDT, after running the provider-OAuth callback path against live Compose Postgres.
 
 ## Repository
 
 - Working directory: `/home/lynn/projects/better-cal`
 - Branch: `main`
 - Target remote: `origin https://github.com/LynnColeArt/better-cal.git`
-- Intended commit message for this slice: `feat: wire provider oauth callback handoff`
+- Intended commit message for this follow-up: `test: harden provider oauth postgres smoke`
 
-The working tree contains the provider-OAuth callback handoff slice. It still has not introduced a public provider-code route.
+The remote `main` already contains `f231e17 feat: wire provider oauth callback handoff`. The current working tree contains a live-Postgres smoke hardening follow-up. It still has not introduced a public provider-code route.
 
 ## Slice Purpose
 
@@ -48,10 +48,13 @@ Postgres app-install mode support:
 
 - [postgres_repository.go](/home/lynn/projects/better-cal/backend/internal/apps/postgres_repository.go)
 - [0031_provider_oauth_app_install_modes.sql](/home/lynn/projects/better-cal/backend/internal/db/migrations/0031_provider_oauth_app_install_modes.sql)
+- [0032_provider_oauth_constraint_names.sql](/home/lynn/projects/better-cal/backend/internal/db/migrations/0032_provider_oauth_constraint_names.sql)
 - Allows provider exchange status `credential_ready`.
 - Allows provider exchange, completion, and activation mode `provider_oauth` alongside `simulated`.
 - Adds a repository read for callback preflight ownership/state validation before internal OAuth exchange work.
 - Adds repository reads by opaque handoff state and callback preflight so replay can be rejected before provider/credential side effects.
+- Adds a compatibility migration for the historical/truncated provider-exchange check-constraint name that live Compose Postgres still had after the first provider-OAuth migration.
+- Narrows the older install-intent Postgres test so it asserts the fixture installation is present without assuming a long-lived Compose database has no other user-123 installed apps.
 
 ## Verification
 
@@ -65,12 +68,17 @@ cd backend && GOCACHE=/tmp/better-cal-go-build go test ./...
 node tools/contracts/validate-contracts.mjs
 node tools/contracts/check-policy-coverage.mjs --report
 git diff --check
+docker compose up --build -d postgres
+docker compose exec -T postgres pg_isready -U better_cal -d better_cal
+cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/better-cal-go-build go test ./internal/apps -run TestPostgresRepositoryRoundTripProviderOAuthCallbackModes -count=1 -v
+cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/better-cal-go-build go test ./internal/apps -count=1 -v
+cd backend && CALDIY_TEST_DATABASE_URL="postgres://better_cal:better_cal_dev@127.0.0.1:54320/better_cal?sslmode=disable" GOCACHE=/tmp/better-cal-go-build go test ./internal/db ./internal/apps ./internal/auth ./internal/authz ./internal/booking ./internal/calendar ./internal/calendars ./internal/credentials ./internal/email ./internal/httpapi ./internal/slots
 ```
 
 ## Next Slice Recommendation
 
 The next useful slice is to make the callback path durable against real provider behavior:
 
-1. run the provider-OAuth callback mode through a live Postgres smoke script once the local Compose DB is up;
-2. replace the in-memory fixture token sink with an encrypted token secret repository;
-3. add provider callback signature/state fixtures before exposing any compatibility HTTP callback route.
+1. replace the in-memory fixture token sink with an encrypted token secret repository;
+2. add provider callback signature/state fixtures before exposing any compatibility HTTP callback route;
+3. add a dedicated smoke command/script for the provider-OAuth callback path if this starts being run outside `go test`.
